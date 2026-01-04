@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-01-05
+
+### Added
+- **AWS Bedrock IAM Role Support** - `portkey_integration` now supports a `configurations` field for provider-specific settings:
+  - AWS Bedrock with IAM Role authentication (`aws_role_arn`, `aws_region`, `aws_external_id`)
+  - AWS Bedrock with Access Keys (`aws_access_key_id`, `aws_region`)
+  - Azure OpenAI configurations (`resource_name`, `deployment_id`, `api_version`)
+
+### Documentation
+- Added comprehensive examples for AWS Bedrock and Azure OpenAI integrations
+- Updated `portkey_integration` documentation with `configurations` field
+
+## [0.2.4] - 2026-01-05
+
+### Fixed
+- Fixed lint errors (gofmt, unused function, errcheck)
+- **Critical: Fixed "Provider produced inconsistent result after apply" errors** - Resolved issues where Terraform would report inconsistent results due to state handling
+
+## [0.2.3] - 2026-01-04
+
+### Documentation
+- Added known issue for workspace deletion with emoji names in README
+
+## [0.2.2] - 2026-01-04
+
 ### Fixed
 - **Critical: Resources no longer unnecessarily recreated on every apply** - Fixed a bug where `RequiresReplace` attributes (like `workspace_id`) were being overwritten during `Read()` operations, causing Terraform to detect false changes and trigger destroy/create cycles. Affected resources:
   - `portkey_config`
@@ -18,6 +43,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `portkey_user_invite`
   - `portkey_rate_limits_policy`
   - `portkey_usage_limits_policy`
+- Fixed CI linting issues and code formatting
+- Reverted golangci-lint config to v1 format for CI compatibility
+
+## [0.2.1] - 2026-01-03
+
+### Documentation
+- Added Prerequisites section to README
+- Added Troubleshooting section to README
+- Added Known Issues section to README
+- Fixed README examples to use `jsonencode()` for JSON fields
+
+### Fixed
+- Fixed provider unit tests with correct resource counts
+- Added Terraform setup to CI and formatted example files
+- Fixed gofmt formatting and removed unused functions
+
+## [0.2.0] - 2026-01-02
 
 ### Added
 - **AI Gateway Resources:**
@@ -41,7 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `portkey_rate_limits_policy`, `portkey_rate_limits_policies`
   - `portkey_api_key`, `portkey_api_keys`
 
-## [0.1.0] - TBD
+### Documentation
+- Added guide for adding new APIs to the Terraform provider
+- Added Registry and CI badges to README
+
+## [0.1.0] - 2026-01-01
 
 ### Added
 - Initial release of the Portkey Terraform Provider
@@ -71,6 +117,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Portkey-AI/terraform-provider-portkey/releases/tag/v0.1.0
 

@@ -341,11 +341,60 @@ Manages AI provider integrations (organization-level).
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `name` | String | Yes | Name of the integration |
-| `ai_provider_id` | String | Yes | Provider: `openai`, `anthropic`, `azure-openai`, etc. |
-| `key` | String | Yes | API key for the provider |
+| `ai_provider_id` | String | Yes | Provider: `openai`, `anthropic`, `azure-openai`, `aws-bedrock`, etc. |
+| `key` | String | No | API key for the provider (write-only) |
+| `configurations` | String (JSON) | No | Provider-specific configurations (write-only) |
 | `description` | String | No | Description |
 
 **Import**: `terraform import portkey_integration.example integration-slug`
+
+**Note**: The `key` and `configurations` fields are write-only and cannot be retrieved from the API after creation. When importing, you must manually add these values to your configuration.
+
+##### AWS Bedrock with IAM Role
+
+```hcl
+resource "portkey_integration" "bedrock" {
+  name           = "AWS Bedrock Production"
+  ai_provider_id = "aws-bedrock"
+  
+  configurations = jsonencode({
+    aws_role_arn    = "arn:aws:iam::123456789012:role/PortkeyBedrockRole"
+    aws_region      = "us-east-1"
+    aws_external_id = "your-external-id"  # Optional
+  })
+}
+```
+
+##### AWS Bedrock with Access Keys
+
+```hcl
+resource "portkey_integration" "bedrock_keys" {
+  name           = "AWS Bedrock (Access Keys)"
+  ai_provider_id = "aws-bedrock"
+  key            = var.aws_secret_access_key
+  
+  configurations = jsonencode({
+    aws_access_key_id = var.aws_access_key_id
+    aws_region        = "us-east-1"
+  })
+}
+```
+
+##### Azure OpenAI
+
+```hcl
+resource "portkey_integration" "azure_openai" {
+  name           = "Azure OpenAI"
+  ai_provider_id = "azure-openai"
+  key            = var.azure_api_key
+  
+  configurations = jsonencode({
+    resource_name = "my-azure-resource"
+    deployment_id = "gpt-4-deployment"
+    api_version   = "2024-02-15-preview"
+  })
+}
+```
 
 #### `portkey_provider`
 

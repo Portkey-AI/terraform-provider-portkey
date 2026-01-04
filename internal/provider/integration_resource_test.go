@@ -34,9 +34,10 @@ func TestAccIntegrationResource_basic(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				// key: write-only
+				// configurations: write-only
 				// slug: BUG - API returns UUID instead of original slug on GET (needs investigation)
 				// updated_at: timestamp may change between operations
-				ImportStateVerifyIgnore: []string{"key", "slug", "updated_at"},
+				ImportStateVerifyIgnore: []string{"key", "configurations", "slug", "updated_at"},
 			},
 			// Update testing
 			{
@@ -94,6 +95,26 @@ func TestAccIntegrationResource_updateName(t *testing.T) {
 	})
 }
 
+func TestAccIntegrationResource_withConfigurations(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-config")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithConfigurations(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "aws-bedrock"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
 func testAccIntegrationResourceConfig(name, aiProviderID, description string) string {
 	return fmt.Sprintf(`
 provider "portkey" {}
@@ -118,4 +139,20 @@ resource "portkey_integration" "test" {
   key            = "sk-test-fake-key-12345"
 }
 `, name, slug, aiProviderID)
+}
+
+func testAccIntegrationResourceConfigWithConfigurations(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "aws-bedrock"
+  
+  configurations = jsonencode({
+    aws_role_arn = "arn:aws:iam::123456789012:role/TestRole"
+    aws_region   = "us-east-1"
+  })
+}
+`, name)
 }

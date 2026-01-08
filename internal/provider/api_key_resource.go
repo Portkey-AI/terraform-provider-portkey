@@ -44,6 +44,8 @@ type apiKeyResourceModel struct {
 	UserID         types.String `tfsdk:"user_id"`
 	Status         types.String `tfsdk:"status"`
 	Scopes         types.List   `tfsdk:"scopes"`
+	Metadata       types.Map    `tfsdk:"metadata"`
+	AlertEmails    types.List   `tfsdk:"alert_emails"`
 	CreatedAt      types.String `tfsdk:"created_at"`
 	UpdatedAt      types.String `tfsdk:"updated_at"`
 }
@@ -126,6 +128,16 @@ API Key Types:
 				Description: "List of permission scopes for this API key.",
 				Optional:    true,
 				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"metadata": schema.MapAttribute{
+				Description: "Custom metadata to attach to the API key. This metadata will be included with every request made using this key. Useful for tracking, observability, and identifying services. Example: {\"_user\": \"service-name\", \"service_uuid\": \"abc123\"}",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
+			"alert_emails": schema.ListAttribute{
+				Description: "List of email addresses to receive alerts related to this API key's usage.",
+				Optional:    true,
 				ElementType: types.StringType,
 			},
 			"created_at": schema.StringAttribute{
@@ -218,6 +230,31 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		createReq.Scopes = scopes
 	}
 
+	// Handle metadata
+	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
+		var metadata map[string]string
+		diags = plan.Metadata.ElementsAs(ctx, &metadata, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.APIKeyDefaults{}
+		}
+		createReq.Defaults.Metadata = metadata
+	}
+
+	// Handle alert_emails
+	if !plan.AlertEmails.IsNull() && !plan.AlertEmails.IsUnknown() {
+		var alertEmails []string
+		diags = plan.AlertEmails.ElementsAs(ctx, &alertEmails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		createReq.AlertEmails = alertEmails
+	}
+
 	// Create API key
 	createResp, err := r.client.CreateAPIKey(ctx, keyType, subType, createReq)
 	if err != nil {
@@ -270,6 +307,30 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 			return
 		}
 		plan.Scopes = scopesList
+	}
+
+	// Handle metadata from API
+	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.Metadata = metadataMap
+	} else if plan.Metadata.IsNull() {
+		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle alert_emails from API
+	if len(apiKey.AlertEmails) > 0 {
+		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.AlertEmails = alertEmailsList
+	} else if plan.AlertEmails.IsNull() {
+		plan.AlertEmails = types.ListNull(types.StringType)
 	}
 
 	// Set state to fully populated data
@@ -348,6 +409,30 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.Scopes = scopesList
 	}
 
+	// Handle metadata from API
+	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.Metadata = metadataMap
+	} else {
+		state.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle alert_emails from API
+	if len(apiKey.AlertEmails) > 0 {
+		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.AlertEmails = alertEmailsList
+	} else {
+		state.AlertEmails = types.ListNull(types.StringType)
+	}
+
 	state.CreatedAt = types.StringValue(apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	if !apiKey.UpdatedAt.IsZero() {
 		state.UpdatedAt = types.StringValue(apiKey.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
@@ -399,6 +484,31 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.Scopes = scopes
 	}
 
+	// Handle metadata
+	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
+		var metadata map[string]string
+		diags = plan.Metadata.ElementsAs(ctx, &metadata, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		updateReq.Defaults.Metadata = metadata
+	}
+
+	// Handle alert_emails
+	if !plan.AlertEmails.IsNull() && !plan.AlertEmails.IsUnknown() {
+		var alertEmails []string
+		diags = plan.AlertEmails.ElementsAs(ctx, &alertEmails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateReq.AlertEmails = alertEmails
+	}
+
 	apiKey, err := r.client.UpdateAPIKey(ctx, state.ID.ValueString(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -426,6 +536,30 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 			return
 		}
 		plan.Scopes = scopesList
+	}
+
+	// Handle metadata from API
+	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.Metadata = metadataMap
+	} else if plan.Metadata.IsNull() {
+		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle alert_emails from API
+	if len(apiKey.AlertEmails) > 0 {
+		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.AlertEmails = alertEmailsList
+	} else if plan.AlertEmails.IsNull() {
+		plan.AlertEmails = types.ListNull(types.StringType)
 	}
 
 	diags = resp.State.Set(ctx, plan)

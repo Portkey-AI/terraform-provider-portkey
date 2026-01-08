@@ -565,26 +565,33 @@ func (c *Client) DeleteIntegration(ctx context.Context, slug string) error {
 	return err
 }
 
+// APIKeyDefaults represents the defaults configuration for an API key
+type APIKeyDefaults struct {
+	Metadata            map[string]string `json:"metadata,omitempty"`
+	ConfigID            string            `json:"config_id,omitempty"`
+	AllowConfigOverride *bool             `json:"allow_config_override,omitempty"`
+}
+
 // APIKey represents a Portkey API key
 type APIKey struct {
-	ID             string                 `json:"id"`
-	Key            string                 `json:"key,omitempty"` // Only returned on creation
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description,omitempty"`
-	Type           string                 `json:"type"` // organisation-service, workspace-service, workspace-user
-	OrganisationID string                 `json:"organisation_id"`
-	WorkspaceID    string                 `json:"workspace_id,omitempty"`
-	UserID         string                 `json:"user_id,omitempty"`
-	Status         string                 `json:"status"`
-	CreationMode   string                 `json:"creation_mode,omitempty"`
-	RateLimits     []RateLimit            `json:"rate_limits,omitempty"`
-	UsageLimits    *UsageLimits           `json:"usage_limits,omitempty"`
-	Scopes         []string               `json:"scopes,omitempty"`
-	Defaults       map[string]interface{} `json:"defaults,omitempty"`
-	AlertEmails    []string               `json:"alert_emails,omitempty"`
-	ExpiresAt      *time.Time             `json:"expires_at,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"last_updated_at"`
+	ID             string          `json:"id"`
+	Key            string          `json:"key,omitempty"` // Only returned on creation
+	Name           string          `json:"name"`
+	Description    string          `json:"description,omitempty"`
+	Type           string          `json:"type"` // organisation-service, workspace-service, workspace-user
+	OrganisationID string          `json:"organisation_id"`
+	WorkspaceID    string          `json:"workspace_id,omitempty"`
+	UserID         string          `json:"user_id,omitempty"`
+	Status         string          `json:"status"`
+	CreationMode   string          `json:"creation_mode,omitempty"`
+	RateLimits     []RateLimit     `json:"rate_limits,omitempty"`
+	UsageLimits    *UsageLimits    `json:"usage_limits,omitempty"`
+	Scopes         []string        `json:"scopes,omitempty"`
+	Defaults       *APIKeyDefaults `json:"defaults,omitempty"`
+	AlertEmails    []string        `json:"alert_emails,omitempty"`
+	ExpiresAt      *time.Time      `json:"expires_at,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"last_updated_at"`
 }
 
 // RateLimit represents a rate limit configuration
@@ -602,16 +609,16 @@ type UsageLimits struct {
 
 // CreateAPIKeyRequest represents the request to create an API key
 type CreateAPIKeyRequest struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	WorkspaceID string                 `json:"workspace_id,omitempty"`
-	UserID      string                 `json:"user_id,omitempty"` // Required for user sub-type
-	RateLimits  []RateLimit            `json:"rate_limits,omitempty"`
-	UsageLimits *UsageLimits           `json:"usage_limits,omitempty"`
-	Scopes      []string               `json:"scopes,omitempty"`
-	Defaults    map[string]interface{} `json:"defaults,omitempty"`
-	AlertEmails []string               `json:"alert_emails,omitempty"`
-	ExpiresAt   string                 `json:"expires_at,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	WorkspaceID string          `json:"workspace_id,omitempty"`
+	UserID      string          `json:"user_id,omitempty"` // Required for user sub-type
+	RateLimits  []RateLimit     `json:"rate_limits,omitempty"`
+	UsageLimits *UsageLimits    `json:"usage_limits,omitempty"`
+	Scopes      []string        `json:"scopes,omitempty"`
+	Defaults    *APIKeyDefaults `json:"defaults,omitempty"`
+	AlertEmails []string        `json:"alert_emails,omitempty"`
+	ExpiresAt   string          `json:"expires_at,omitempty"`
 }
 
 // CreateAPIKeyResponse represents the response from creating an API key
@@ -623,13 +630,13 @@ type CreateAPIKeyResponse struct {
 
 // UpdateAPIKeyRequest represents the request to update an API key
 type UpdateAPIKeyRequest struct {
-	Name        string                 `json:"name,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	RateLimits  []RateLimit            `json:"rate_limits,omitempty"`
-	UsageLimits *UsageLimits           `json:"usage_limits,omitempty"`
-	Scopes      []string               `json:"scopes,omitempty"`
-	Defaults    map[string]interface{} `json:"defaults,omitempty"`
-	AlertEmails []string               `json:"alert_emails,omitempty"`
+	Name        string          `json:"name,omitempty"`
+	Description string          `json:"description,omitempty"`
+	RateLimits  []RateLimit     `json:"rate_limits,omitempty"`
+	UsageLimits *UsageLimits    `json:"usage_limits,omitempty"`
+	Scopes      []string        `json:"scopes,omitempty"`
+	Defaults    *APIKeyDefaults `json:"defaults,omitempty"`
+	AlertEmails []string        `json:"alert_emails,omitempty"`
 }
 
 // CreateAPIKey creates a new API key

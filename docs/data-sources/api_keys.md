@@ -28,9 +28,11 @@ Fetches all Portkey API Keys. Optionally filter by workspace_id.
 
 Read-Only:
 
+- `alert_emails` (List of String) List of email addresses that receive alerts for this API key.
 - `created_at` (String) Timestamp when the API key was created.
 - `description` (String) Description of the API key.
 - `id` (String) API Key identifier (UUID).
+- `metadata` (Map of String) Custom metadata attached to the API key.
 - `name` (String) Human-readable name for the API key.
 - `organisation_id` (String) Organisation ID this key belongs to.
 - `scopes` (List of String) List of permission scopes for this API key.

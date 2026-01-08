@@ -38,6 +38,8 @@ type apiKeyDataSourceModel struct {
 	UserID         types.String `tfsdk:"user_id"`
 	Status         types.String `tfsdk:"status"`
 	Scopes         types.List   `tfsdk:"scopes"`
+	Metadata       types.Map    `tfsdk:"metadata"`
+	AlertEmails    types.List   `tfsdk:"alert_emails"`
 	CreatedAt      types.String `tfsdk:"created_at"`
 	UpdatedAt      types.String `tfsdk:"updated_at"`
 }
@@ -90,6 +92,16 @@ func (d *apiKeyDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 			},
 			"scopes": schema.ListAttribute{
 				Description: "List of permission scopes for this API key.",
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"metadata": schema.MapAttribute{
+				Description: "Custom metadata attached to the API key.",
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"alert_emails": schema.ListAttribute{
+				Description: "List of email addresses that receive alerts for this API key.",
 				Computed:    true,
 				ElementType: types.StringType,
 			},
@@ -184,6 +196,30 @@ func (d *apiKeyDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		state.Scopes = scopesList
 	} else {
 		state.Scopes = types.ListNull(types.StringType)
+	}
+
+	// Handle metadata
+	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.Metadata = metadataMap
+	} else {
+		state.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle alert_emails
+	if len(apiKey.AlertEmails) > 0 {
+		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.AlertEmails = alertEmailsList
+	} else {
+		state.AlertEmails = types.ListNull(types.StringType)
 	}
 
 	state.CreatedAt = types.StringValue(apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))

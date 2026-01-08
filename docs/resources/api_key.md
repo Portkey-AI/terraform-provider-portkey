@@ -30,7 +30,9 @@ API Key Types:
 
 ### Optional
 
+- `alert_emails` (List of String) List of email addresses to receive alerts related to this API key's usage.
 - `description` (String) Optional description of the API key.
+- `metadata` (Map of String) Custom metadata to attach to the API key. This metadata will be included with every request made using this key. Useful for tracking, observability, and identifying services. Example: `{"_user": "service-name", "service_uuid": "abc123"}`
 - `scopes` (List of String) List of permission scopes for this API key.
 - `user_id` (String) User ID for user-type keys. Required when sub_type is 'user'.
 - `workspace_id` (String) Workspace ID. Required for workspace API keys (type='workspace'). Not used for Admin API keys.

@@ -45,6 +45,8 @@ type apiKeyDataItemModel struct {
 	UserID         types.String `tfsdk:"user_id"`
 	Status         types.String `tfsdk:"status"`
 	Scopes         types.List   `tfsdk:"scopes"`
+	Metadata       types.Map    `tfsdk:"metadata"`
+	AlertEmails    types.List   `tfsdk:"alert_emails"`
 	CreatedAt      types.String `tfsdk:"created_at"`
 	UpdatedAt      types.String `tfsdk:"updated_at"`
 }
@@ -106,6 +108,16 @@ func (d *apiKeysDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 						},
 						"scopes": schema.ListAttribute{
 							Description: "List of permission scopes for this API key.",
+							Computed:    true,
+							ElementType: types.StringType,
+						},
+						"metadata": schema.MapAttribute{
+							Description: "Custom metadata attached to the API key.",
+							Computed:    true,
+							ElementType: types.StringType,
+						},
+						"alert_emails": schema.ListAttribute{
+							Description: "List of email addresses that receive alerts for this API key.",
 							Computed:    true,
 							ElementType: types.StringType,
 						},
@@ -190,6 +202,32 @@ func (d *apiKeysDataSource) Read(ctx context.Context, req datasource.ReadRequest
 			scopesList = types.ListNull(types.StringType)
 		}
 
+		// Handle metadata
+		var metadataMap types.Map
+		if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+			mm, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			metadataMap = mm
+		} else {
+			metadataMap = types.MapNull(types.StringType)
+		}
+
+		// Handle alert_emails
+		var alertEmailsList types.List
+		if len(apiKey.AlertEmails) > 0 {
+			ael, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			alertEmailsList = ael
+		} else {
+			alertEmailsList = types.ListNull(types.StringType)
+		}
+
 		keyItem := apiKeyDataItemModel{
 			ID:             types.StringValue(apiKey.ID),
 			Name:           types.StringValue(apiKey.Name),
@@ -198,6 +236,8 @@ func (d *apiKeysDataSource) Read(ctx context.Context, req datasource.ReadRequest
 			OrganisationID: types.StringValue(apiKey.OrganisationID),
 			Status:         types.StringValue(apiKey.Status),
 			Scopes:         scopesList,
+			Metadata:       metadataMap,
+			AlertEmails:    alertEmailsList,
 			CreatedAt:      types.StringValue(apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00")),
 		}
 

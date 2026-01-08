@@ -35,6 +35,7 @@ type workspaceResourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
+	Metadata    types.Map    `tfsdk:"metadata"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 	UpdatedAt   types.String `tfsdk:"updated_at"`
 }
@@ -63,6 +64,11 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"description": schema.StringAttribute{
 				Description: "Description of the workspace.",
 				Optional:    true,
+			},
+			"metadata": schema.MapAttribute{
+				Description: "Custom metadata to attach to the workspace. This metadata can be used for tracking, observability, and identifying workspaces. All API keys created in this workspace will inherit this metadata by default.",
+				Optional:    true,
+				ElementType: types.StringType,
 			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the workspace was created.",
@@ -118,6 +124,19 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		Description: plan.Description.ValueString(),
 	}
 
+	// Handle metadata
+	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
+		var metadata map[string]string
+		diags = plan.Metadata.ElementsAs(ctx, &metadata, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		createReq.Defaults = &client.WorkspaceDefaults{
+			Metadata: metadata,
+		}
+	}
+
 	workspace, err := r.client.CreateWorkspace(ctx, createReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -131,6 +150,18 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 	plan.ID = types.StringValue(workspace.ID)
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+
+	// Handle metadata from API response
+	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
+		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, workspace.Defaults.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.Metadata = metadataMap
+	} else if plan.Metadata.IsNull() {
+		plan.Metadata = types.MapNull(types.StringType)
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -169,6 +200,19 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 		state.Description = types.StringNull()
 	}
 	// Keep state.Description as-is if it was null and API returns empty
+
+	// Handle metadata from API
+	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
+		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, workspace.Defaults.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.Metadata = metadataMap
+	} else {
+		state.Metadata = types.MapNull(types.StringType)
+	}
+
 	state.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	state.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
@@ -194,6 +238,19 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	updateReq := client.UpdateWorkspaceRequest{
 		Name:        plan.Name.ValueString(),
 		Description: plan.Description.ValueString(),
+	}
+
+	// Handle metadata
+	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
+		var metadata map[string]string
+		diags = plan.Metadata.ElementsAs(ctx, &metadata, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateReq.Defaults = &client.WorkspaceDefaults{
+			Metadata: metadata,
+		}
 	}
 
 	_, err := r.client.UpdateWorkspace(ctx, plan.ID.ValueString(), updateReq)

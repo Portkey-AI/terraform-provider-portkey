@@ -74,25 +74,34 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	return respBody, nil
 }
 
+// WorkspaceDefaults represents the defaults configuration for a workspace
+type WorkspaceDefaults struct {
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
 // Workspace represents a Portkey workspace
 type Workspace struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"last_updated_at"`
+	ID          string             `json:"id"`
+	Slug        string             `json:"slug,omitempty"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Defaults    *WorkspaceDefaults `json:"defaults,omitempty"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"last_updated_at"`
 }
 
 // CreateWorkspaceRequest represents the request to create a workspace
 type CreateWorkspaceRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Defaults    *WorkspaceDefaults `json:"defaults,omitempty"`
 }
 
 // UpdateWorkspaceRequest represents the request to update a workspace
 type UpdateWorkspaceRequest struct {
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
+	Name        string             `json:"name,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Defaults    *WorkspaceDefaults `json:"defaults,omitempty"`
 }
 
 // CreateWorkspace creates a new workspace

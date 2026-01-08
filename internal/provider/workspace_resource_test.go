@@ -139,3 +139,77 @@ resource "portkey_workspace" "test" {
 }
 `, name)
 }
+
+func TestAccWorkspaceResource_withMetadata(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-meta")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with metadata
+			{
+				Config: testAccWorkspaceResourceConfigWithMetadata(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_workspace.test", "id"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "metadata.%", "2"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "metadata._user", "test-workspace"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "metadata.team", "engineering"),
+				),
+			},
+			// ImportState testing
+			{
+				ResourceName:            "portkey_workspace.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_at", "updated_at"},
+			},
+			// Update metadata
+			{
+				Config: testAccWorkspaceResourceConfigWithMetadataUpdated(rName + "-upd"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_workspace.test", "name", rName+"-upd"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "metadata.%", "3"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "metadata._user", "updated-workspace"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "metadata.team", "platform"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "metadata.environment", "production"),
+				),
+			},
+			// Delete testing automatically occurs in TestCase
+		},
+	})
+}
+
+func testAccWorkspaceResourceConfigWithMetadata(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_workspace" "test" {
+  name        = %[1]q
+  description = "Workspace with metadata"
+  
+  metadata = {
+    "_user" = "test-workspace"
+    "team"  = "engineering"
+  }
+}
+`, name)
+}
+
+func testAccWorkspaceResourceConfigWithMetadataUpdated(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_workspace" "test" {
+  name        = %[1]q
+  description = "Workspace with updated metadata"
+  
+  metadata = {
+    "_user"       = "updated-workspace"
+    "team"        = "platform"
+    "environment" = "production"
+  }
+}
+`, name)
+}

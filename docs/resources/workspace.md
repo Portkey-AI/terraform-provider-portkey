@@ -22,6 +22,7 @@ Manages a Portkey workspace. Workspaces are sub-organizational units that enable
 ### Optional
 
 - `description` (String) Description of the workspace.
+- `metadata` (Map of String) Custom metadata to attach to the workspace. This metadata can be used for tracking, observability, and identifying workspaces. All API keys created in this workspace will inherit this metadata by default.
 
 ### Read-Only
 

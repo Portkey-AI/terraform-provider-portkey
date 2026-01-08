@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-01-08
+
+### Added
+- **API Key Metadata & Alert Emails** - `portkey_api_key` now supports:
+  - `metadata` - Custom metadata (map of strings) attached to the API key for tracking, observability, and service identification. Example: `{"_user": "service-name", "service_uuid": "abc123"}`
+  - `alert_emails` - List of email addresses to receive alerts related to the API key's usage
+- **Workspace Metadata** - `portkey_workspace` now supports:
+  - `metadata` - Custom metadata (map of strings) attached to the workspace for tracking teams, environments, and services
+
+### Documentation
+- Updated documentation for `portkey_api_key` resource and data sources
+- Updated documentation for `portkey_workspace` resource and data sources
+
 ## [0.2.6] - 2026-01-05
 
 ### Documentation

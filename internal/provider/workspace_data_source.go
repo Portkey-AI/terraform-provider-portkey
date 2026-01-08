@@ -32,6 +32,7 @@ type workspaceDataSourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
+	Metadata    types.Map    `tfsdk:"metadata"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 	UpdatedAt   types.String `tfsdk:"updated_at"`
 }
@@ -57,6 +58,11 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 			"description": schema.StringAttribute{
 				Description: "Description of the workspace.",
 				Computed:    true,
+			},
+			"metadata": schema.MapAttribute{
+				Description: "Custom metadata attached to the workspace.",
+				Computed:    true,
+				ElementType: types.StringType,
 			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the workspace was created.",
@@ -113,6 +119,19 @@ func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadReque
 	state.ID = types.StringValue(workspace.ID)
 	state.Name = types.StringValue(workspace.Name)
 	state.Description = types.StringValue(workspace.Description)
+
+	// Handle metadata
+	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
+		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, workspace.Defaults.Metadata)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.Metadata = metadataMap
+	} else {
+		state.Metadata = types.MapNull(types.StringType)
+	}
+
 	state.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	state.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 

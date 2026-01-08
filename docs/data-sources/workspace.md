@@ -23,5 +23,6 @@ Fetches a specific Portkey workspace by ID.
 
 - `created_at` (String) Timestamp when the workspace was created.
 - `description` (String) Description of the workspace.
+- `metadata` (Map of String) Custom metadata attached to the workspace.
 - `name` (String) Name of the workspace.
 - `updated_at` (String) Timestamp when the workspace was last updated.

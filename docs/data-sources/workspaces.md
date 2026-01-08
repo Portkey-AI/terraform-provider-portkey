@@ -27,5 +27,6 @@ Read-Only:
 - `created_at` (String) Timestamp when the workspace was created.
 - `description` (String) Description of the workspace.
 - `id` (String) Workspace identifier.
+- `metadata` (Map of String) Custom metadata attached to the workspace.
 - `name` (String) Name of the workspace.
 - `updated_at` (String) Timestamp when the workspace was last updated.

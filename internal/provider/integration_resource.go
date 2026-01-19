@@ -86,18 +86,17 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				},
 			},
 			"key": schema.StringAttribute{
-				Description:        "DEPRECATED: Use key_wo instead. API key for the provider. Stored in state (sensitive).",
-				Optional:           true,
-				Sensitive:          true,
-				DeprecationMessage: "Use key_wo for write-only behavior where the key is never stored in Terraform state. Requires Terraform 1.11+.",
+				Description: "API key for the provider. Stored in Terraform state (marked sensitive). Use this for simpler workflows or when state is already secured. For enhanced security where keys should never be stored in state, use key_wo instead.",
+				Optional:    true,
+				Sensitive:   true,
 			},
 			"key_wo": schema.StringAttribute{
-				Description: "API key for the provider. Write-only: never stored in Terraform state. Requires Terraform 1.11+. Preferred over 'key' attribute. Use with key_version to control when the key is applied.",
+				Description: "API key for the provider (write-only). Never stored in Terraform state or shown in plan output. Requires Terraform 1.11+. Use with key_version to control when the key is sent to the API.",
 				Optional:    true,
 				WriteOnly:   true,
 			},
 			"key_version": schema.Int64Attribute{
-				Description: "Trigger for applying the API key. Increment this value to update the key. When using key_wo, the key is only sent to the API when key_version changes. This makes plans explicit about when keys are being updated.",
+				Description: "Trigger for applying the write-only API key. Only used with key_wo. Increment this value to update the key - the key is only sent to the API when key_version changes.",
 				Optional:    true,
 			},
 			"configurations": schema.StringAttribute{
@@ -184,21 +183,14 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	// Prefer write-only key_wo over deprecated key (read from config for write-only)
+	// Use key_wo (write-only) if provided, otherwise fall back to key
 	if hasKeyWO {
 		tflog.Debug(ctx, "Creating integration with write-only key (key_wo)", map[string]interface{}{
 			"integration_name": plan.Name.ValueString(),
 		})
 		createReq.Key = config.KeyWriteOnly.ValueString()
-
-		// Warn if key_wo is used without key_version
-		if plan.KeyVersion.IsNull() {
-			tflog.Warn(ctx, "key_wo is set without key_version. To update the key in the future, you must set and increment key_version.", map[string]interface{}{
-				"integration_name": plan.Name.ValueString(),
-			})
-		}
 	} else if hasKey {
-		tflog.Debug(ctx, "Creating integration with deprecated key attribute", map[string]interface{}{
+		tflog.Debug(ctx, "Creating integration with key", map[string]interface{}{
 			"integration_name": plan.Name.ValueString(),
 		})
 		createReq.Key = plan.Key.ValueString()
@@ -370,8 +362,8 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 			})
 		}
 	} else if hasKey {
-		// Using deprecated key - send if provided
-		tflog.Debug(ctx, "Updating integration with deprecated key attribute", map[string]interface{}{
+		// Using key (stored in state) - send if provided
+		tflog.Debug(ctx, "Updating integration with key", map[string]interface{}{
 			"integration_name": plan.Name.ValueString(),
 		})
 		updateReq.Key = plan.Key.ValueString()

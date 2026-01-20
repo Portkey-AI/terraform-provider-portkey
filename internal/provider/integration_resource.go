@@ -102,6 +102,7 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"configurations": schema.StringAttribute{
 				Description: "Provider-specific configurations as JSON. For OpenAI: jsonencode({openai_organization = \"org-...\", openai_project = \"proj-...\"}). For AWS Bedrock: jsonencode({aws_role_arn = \"arn:aws:iam::...\", aws_region = \"us-east-1\"}). For Azure OpenAI: jsonencode({resource_name = \"...\", deployment_id = \"...\", api_version = \"...\"}).",
 				Optional:    true,
+				Sensitive:   true,
 			},
 			"description": schema.StringAttribute{
 				Description: "Optional description of the integration.",
@@ -178,9 +179,17 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 	if hasKey && hasKeyWO {
 		resp.Diagnostics.AddError(
 			"Conflicting API Key Attributes",
-			"Cannot specify both 'key' and 'key_wo'. Use 'key_wo' (write-only, recommended) or 'key' (deprecated), but not both.",
+			"Cannot specify both 'key' and 'key_wo'. Choose one: 'key' (stored in state, simpler) or 'key_wo' (write-only, enhanced security).",
 		)
 		return
+	}
+
+	// Warn if key_wo is used without key_version (key cannot be updated after creation)
+	if hasKeyWO && plan.KeyVersion.IsNull() {
+		resp.Diagnostics.AddWarning(
+			"Missing key_version",
+			"Using key_wo without key_version means the API key cannot be updated after initial creation. Consider adding key_version to enable key updates.",
+		)
 	}
 
 	// Use key_wo (write-only) if provided, otherwise fall back to key
@@ -337,14 +346,22 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 	if hasKey && hasKeyWO {
 		resp.Diagnostics.AddError(
 			"Conflicting API Key Attributes",
-			"Cannot specify both 'key' and 'key_wo'. Use 'key_wo' (write-only, recommended) or 'key' (deprecated), but not both.",
+			"Cannot specify both 'key' and 'key_wo'. Choose one: 'key' (stored in state, simpler) or 'key_wo' (write-only, enhanced security).",
 		)
 		return
 	}
 
+	// Warn if key_wo is used without key_version (key cannot be updated)
+	if hasKeyWO && plan.KeyVersion.IsNull() {
+		resp.Diagnostics.AddWarning(
+			"Missing key_version",
+			"Using key_wo without key_version means the API key cannot be updated after initial creation. Consider adding key_version to enable key updates.",
+		)
+	}
+
 	// Handle key updates:
 	// - For key_wo (write-only): only send if key_version changed (trigger-based)
-	// - For key (deprecated): send if provided (backwards compatibility)
+	// - For key: send if provided
 	if hasKeyWO {
 		// Using write-only key - check if key_version changed
 		keyVersionChanged := !plan.KeyVersion.Equal(state.KeyVersion)

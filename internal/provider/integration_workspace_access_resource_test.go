@@ -144,18 +144,18 @@ resource "portkey_integration_workspace_access" "test" {
   workspace_id   = portkey_workspace.test.id
   enabled        = true
 
-  usage_limits {
+  usage_limits = [{
     type            = "cost"
     credit_limit    = 100
     alert_threshold = 80
     periodic_reset  = "monthly"
-  }
+  }]
 
-  rate_limits {
+  rate_limits = [{
     type  = "requests"
     unit  = "rpm"
     value = 1000
-  }
+  }]
 }
 `, name)
 }
@@ -228,18 +228,18 @@ resource "portkey_integration_workspace_access" "test" {
   workspace_id   = portkey_workspace.test.id
   enabled        = true
 
-  usage_limits {
+  usage_limits = [{
     type            = "cost"
     credit_limit    = 200
     alert_threshold = 90
     periodic_reset  = "monthly"
-  }
+  }]
 
-  rate_limits {
+  rate_limits = [{
     type  = "requests"
     unit  = "rpm"
     value = 2000
-  }
+  }]
 }
 `, name)
 }
@@ -302,70 +302,5 @@ resource "portkey_provider" "test" {
 `, name)
 }
 
-// TestAccIntegrationWorkspaceAccessResource_multipleLimits tests workspace access with multiple usage and rate limits.
-func TestAccIntegrationWorkspaceAccessResource_multipleLimits(t *testing.T) {
-	rName := acctest.RandomWithPrefix("tf-acc-iwmulti")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccIntegrationWorkspaceAccessResourceConfigMultipleLimits(rName),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet("portkey_integration_workspace_access.test", "id"),
-					resource.TestCheckResourceAttr("portkey_integration_workspace_access.test", "enabled", "true"),
-					resource.TestCheckResourceAttr("portkey_integration_workspace_access.test", "usage_limits.#", "2"),
-					resource.TestCheckResourceAttr("portkey_integration_workspace_access.test", "rate_limits.#", "2"),
-				),
-			},
-		},
-	})
-}
-
-// testAccIntegrationWorkspaceAccessResourceConfigMultipleLimits creates workspace access with multiple limits
-func testAccIntegrationWorkspaceAccessResourceConfigMultipleLimits(name string) string {
-	return fmt.Sprintf(`
-provider "portkey" {}
-
-resource "portkey_workspace" "test" {
-  name        = %[1]q
-  description = "Test workspace for multiple limits"
-}
-
-# Get existing integrations from the organization
-data "portkey_integrations" "all" {}
-
-resource "portkey_integration_workspace_access" "test" {
-  integration_id = data.portkey_integrations.all.integrations[0].slug
-  workspace_id   = portkey_workspace.test.id
-  enabled        = true
-
-  usage_limits {
-    type            = "cost"
-    credit_limit    = 100
-    alert_threshold = 80
-    periodic_reset  = "monthly"
-  }
-
-  usage_limits {
-    type            = "tokens"
-    credit_limit    = 1000000
-    alert_threshold = 90
-    periodic_reset  = "weekly"
-  }
-
-  rate_limits {
-    type  = "requests"
-    unit  = "rpm"
-    value = 1000
-  }
-
-  rate_limits {
-    type  = "tokens"
-    unit  = "rpd"
-    value = 100000
-  }
-}
-`, name)
-}
+// Note: Multiple limits per workspace are not supported by the API (maxItems: 1).
+// The schema uses ListNestedAttribute to match the API structure, but only one item is allowed.

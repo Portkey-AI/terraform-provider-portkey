@@ -49,18 +49,18 @@ resource "portkey_integration_workspace_access" "openai_dev" {
   workspace_id   = portkey_workspace.dev.id
   enabled        = true
 
-  usage_limits {
+  usage_limits = [{
     type            = "cost"
     credit_limit    = 100
     alert_threshold = 80
     periodic_reset  = "monthly"
-  }
+  }]
 
-  rate_limits {
+  rate_limits = [{
     type  = "requests"
     unit  = "rpm"
     value = 1000
-  }
+  }]
 }
 ```
 

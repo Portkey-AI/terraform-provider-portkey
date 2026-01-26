@@ -18,6 +18,7 @@ This provider enables you to manage:
 
 ### AI Gateway Resources
 - **Integrations**: Manage AI provider connections (OpenAI, Anthropic, Azure, etc.)
+- **Integration Workspace Access**: Enable integrations for specific workspaces with optional usage/rate limits
 - **Providers (Virtual Keys)**: Create workspace-scoped API keys for AI providers
 - **Configs**: Define gateway configurations with routing, fallbacks, and load balancing
 - **Prompts**: Manage versioned prompt templates
@@ -387,12 +388,58 @@ resource "portkey_integration" "azure_openai" {
   name           = "Azure OpenAI"
   ai_provider_id = "azure-openai"
   key            = var.azure_api_key
-  
+
   configurations = jsonencode({
     resource_name = "my-azure-resource"
     deployment_id = "gpt-4-deployment"
     api_version   = "2024-02-15-preview"
   })
+}
+```
+
+#### `portkey_integration_workspace_access`
+
+Manages workspace access for integrations. Enables an integration to be used within a specific workspace.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `integration_id` | String | Yes | Integration slug or ID |
+| `workspace_id` | String | Yes | Workspace ID to grant access to |
+| `enabled` | Boolean | No | Whether access is enabled (default: true) |
+| `usage_limits` | Block | No | Usage limits for this workspace |
+| `rate_limits` | Block | No | Rate limits for this workspace |
+
+**Import**: `terraform import portkey_integration_workspace_access.example integration-slug/workspace-id`
+
+##### Basic Example
+
+```hcl
+resource "portkey_integration_workspace_access" "openai_dev" {
+  integration_id = portkey_integration.openai.slug
+  workspace_id   = portkey_workspace.dev.id
+}
+```
+
+##### With Limits
+
+```hcl
+resource "portkey_integration_workspace_access" "openai_dev" {
+  integration_id = portkey_integration.openai.slug
+  workspace_id   = portkey_workspace.dev.id
+  enabled        = true
+
+  usage_limits {
+    type            = "cost"
+    credit_limit    = 100
+    alert_threshold = 80
+    periodic_reset  = "monthly"
+  }
+
+  rate_limits {
+    type  = "requests"
+    unit  = "rpm"
+    value = 1000
+  }
 }
 ```
 
@@ -523,6 +570,7 @@ Manages Portkey API keys.
 |-------------|-------------|---------------|
 | `portkey_integration` | Fetch a single integration | `slug` |
 | `portkey_integrations` | List all integrations | - |
+| `portkey_integration_workspaces` | List workspace access for an integration | `integration_id` |
 | `portkey_provider` | Fetch a single provider | `id`, `workspace_id` |
 | `portkey_providers` | List providers in workspace | `workspace_id` |
 | `portkey_config` | Fetch a single config | `slug` |
@@ -648,15 +696,28 @@ resource "portkey_integration" "openai" {
   key            = var.openai_api_key
 }
 
+# Create a workspace
+resource "portkey_workspace" "production" {
+  name = "Production"
+}
+
+# Enable the integration for the workspace
+resource "portkey_integration_workspace_access" "openai_prod" {
+  integration_id = portkey_integration.openai.slug
+  workspace_id   = portkey_workspace.production.id
+}
+
 # Then create a provider linked to the integration
 resource "portkey_provider" "main" {
   name           = "Production OpenAI"
-  workspace_id   = "9da48f29-e564-4bcd-8480-757803acf5ae"  # Must be UUID
+  workspace_id   = portkey_workspace.production.id
   integration_id = portkey_integration.openai.slug
+
+  depends_on = [portkey_integration_workspace_access.openai_prod]
 }
 ```
 
-**Common error**: `403 Forbidden` - The integration is not enabled for the specified workspace. Enable it in Portkey UI first.
+**Common error**: `403 Forbidden` - The integration is not enabled for the specified workspace. Use `portkey_integration_workspace_access` to enable it.
 
 ### `portkey_api_key`
 
@@ -705,7 +766,7 @@ resource "portkey_guardrail" "example" {
 
 | Resource | Cause | Solution |
 |----------|-------|----------|
-| `portkey_provider` | Integration not enabled for workspace | Enable integration for workspace in Portkey UI |
+| `portkey_provider` | Integration not enabled for workspace | Use `portkey_integration_workspace_access` resource to enable |
 | `portkey_api_key` | Admin key lacks required scopes | Use an admin key with full permissions |
 | Any resource | Workspace access not granted | Ensure your admin key has workspace access |
 

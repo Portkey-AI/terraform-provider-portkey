@@ -1512,3 +1512,102 @@ func (c *Client) DeleteRateLimitsPolicy(ctx context.Context, id string) error {
 	_, err := c.doRequest(ctx, http.MethodDelete, "/policies/rate-limits/"+id, nil)
 	return err
 }
+
+// IntegrationWorkspaceUsageLimits represents usage limits for a workspace integration
+type IntegrationWorkspaceUsageLimits struct {
+	Type           string `json:"type,omitempty"`            // "cost" or "tokens"
+	CreditLimit    *int   `json:"credit_limit,omitempty"`    // Credit limit value
+	AlertThreshold *int   `json:"alert_threshold,omitempty"` // Alert threshold percentage
+	PeriodicReset  string `json:"periodic_reset,omitempty"`  // "monthly" or "weekly"
+}
+
+// IntegrationWorkspaceRateLimits represents rate limits for a workspace integration
+type IntegrationWorkspaceRateLimits struct {
+	Type  string `json:"type,omitempty"`  // "requests" or "tokens"
+	Unit  string `json:"unit,omitempty"`  // "rpd", "rph", "rpm"
+	Value *int   `json:"value,omitempty"` // Limit value
+}
+
+// IntegrationWorkspace represents workspace access configuration for an integration
+type IntegrationWorkspace struct {
+	ID          string                           `json:"id"`
+	Enabled     bool                             `json:"enabled"`
+	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
+	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
+}
+
+// IntegrationWorkspacesResponse represents the response from listing integration workspaces
+type IntegrationWorkspacesResponse struct {
+	Total      int                    `json:"total"`
+	Workspaces []IntegrationWorkspace `json:"workspaces"`
+}
+
+// WorkspaceUpdateRequest represents a single workspace update in a bulk request
+type WorkspaceUpdateRequest struct {
+	ID          string                           `json:"id"`
+	Enabled     bool                             `json:"enabled"`
+	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
+	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
+	ResetUsage  bool                             `json:"reset_usage,omitempty"`
+}
+
+// GlobalWorkspaceAccess represents global workspace access settings
+type GlobalWorkspaceAccess struct {
+	Enabled     bool                             `json:"enabled"`
+	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
+	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
+}
+
+// BulkUpdateWorkspacesRequest represents the request to bulk update workspace access
+type BulkUpdateWorkspacesRequest struct {
+	Workspaces                      []WorkspaceUpdateRequest `json:"workspaces,omitempty"`
+	GlobalWorkspaceAccess           *GlobalWorkspaceAccess   `json:"global_workspace_access,omitempty"`
+	OverrideExistingWorkspaceAccess bool                     `json:"override_existing_workspace_access,omitempty"`
+}
+
+// GetIntegrationWorkspaces retrieves workspace access for an integration
+func (c *Client) GetIntegrationWorkspaces(ctx context.Context, integrationSlug string) (*IntegrationWorkspacesResponse, error) {
+	path := fmt.Sprintf("/integrations/%s/workspaces", integrationSlug)
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response IntegrationWorkspacesResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetIntegrationWorkspace retrieves a specific workspace's access for an integration
+func (c *Client) GetIntegrationWorkspace(ctx context.Context, integrationSlug, workspaceID string) (*IntegrationWorkspace, error) {
+	workspaces, err := c.GetIntegrationWorkspaces(ctx, integrationSlug)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ws := range workspaces.Workspaces {
+		if ws.ID == workspaceID {
+			return &ws, nil
+		}
+	}
+
+	return nil, fmt.Errorf("workspace %s not found for integration %s", workspaceID, integrationSlug)
+}
+
+// UpdateIntegrationWorkspaces bulk updates workspace access for an integration
+func (c *Client) UpdateIntegrationWorkspaces(ctx context.Context, integrationSlug string, req BulkUpdateWorkspacesRequest) error {
+	path := fmt.Sprintf("/integrations/%s/workspaces", integrationSlug)
+	_, err := c.doRequest(ctx, http.MethodPut, path, req)
+	return err
+}
+
+// UpdateIntegrationWorkspace updates a single workspace's access for an integration
+func (c *Client) UpdateIntegrationWorkspace(ctx context.Context, integrationSlug string, workspace WorkspaceUpdateRequest) error {
+	req := BulkUpdateWorkspacesRequest{
+		Workspaces: []WorkspaceUpdateRequest{workspace},
+	}
+	return c.UpdateIntegrationWorkspaces(ctx, integrationSlug, req)
+}

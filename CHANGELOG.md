@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-01-26
+
+### Added
+- **Write-Only API Key Support** - `portkey_integration` now supports write-only API keys using Terraform 1.11+'s `WriteOnly` attribute:
+  - `key_wo` - API key that is never stored in Terraform state or shown in plan output
+  - `key_version` - Trigger to control when the key is sent to the API (increment to update)
+  - Provides enhanced security for teams with strict compliance requirements
+  - Original `key` attribute remains available for simpler workflows
+- **Integration Workspace Access** - New resource and data source for managing integration access per workspace:
+  - `portkey_integration_workspace_access` - Enable integrations for specific workspaces with optional limits
+  - `portkey_integration_workspaces` - Data source to list workspace access configurations
+  - Support for `usage_limits` (cost/request limits with alerts and periodic reset)
+  - Support for `rate_limits` (requests per minute/hour/day)
+  - Enables full IaC workflows without manual UI enablement
+
+### Documentation
+- Updated `portkey_integration` documentation with write-only key examples
+- Added documentation for integration workspace access resource and data source
+
 ## [0.2.7] - 2026-01-08
 
 ### Added
@@ -136,7 +155,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.7...v0.2.8
+[0.2.7]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.3...v0.2.4

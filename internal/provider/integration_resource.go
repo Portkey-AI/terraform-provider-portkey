@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
 
@@ -38,6 +39,8 @@ type integrationResourceModel struct {
 	Name           types.String `tfsdk:"name"`
 	AIProviderID   types.String `tfsdk:"ai_provider_id"`
 	Key            types.String `tfsdk:"key"`
+	KeyWriteOnly   types.String `tfsdk:"key_wo"`
+	KeyVersion     types.Int64  `tfsdk:"key_version"`
 	Configurations types.String `tfsdk:"configurations"`
 	Description    types.String `tfsdk:"description"`
 	Status         types.String `tfsdk:"status"`
@@ -83,12 +86,21 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				},
 			},
 			"key": schema.StringAttribute{
-				Description: "API key for the provider. This is write-only and will not be returned by the API.",
+				Description: "API key for the provider. Stored in Terraform state (marked sensitive). Use this for simpler workflows or when state is already secured. For enhanced security where keys should never be stored in state, use key_wo instead.",
 				Optional:    true,
 				Sensitive:   true,
 			},
+			"key_wo": schema.StringAttribute{
+				Description: "API key for the provider (write-only). Never stored in Terraform state or shown in plan output. Requires Terraform 1.11+. Use with key_version to control when the key is sent to the API.",
+				Optional:    true,
+				WriteOnly:   true,
+			},
+			"key_version": schema.Int64Attribute{
+				Description: "Trigger for applying the write-only API key. Only used with key_wo. Increment this value to update the key - the key is only sent to the API when key_version changes.",
+				Optional:    true,
+			},
 			"configurations": schema.StringAttribute{
-				Description: "Provider-specific configurations as JSON. For AWS Bedrock with IAM Role, use: jsonencode({aws_role_arn = \"arn:aws:iam::...\", aws_region = \"us-east-1\"}). For Azure OpenAI: jsonencode({resource_name = \"...\", deployment_id = \"...\", api_version = \"...\"}). This is write-only and will not be returned by the API.",
+				Description: "Provider-specific configurations as JSON. For OpenAI: jsonencode({openai_organization = \"org-...\", openai_project = \"proj-...\"}). For AWS Bedrock: jsonencode({aws_role_arn = \"arn:aws:iam::...\", aws_region = \"us-east-1\"}). For Azure OpenAI: jsonencode({resource_name = \"...\", deployment_id = \"...\", api_version = \"...\"}).",
 				Optional:    true,
 				Sensitive:   true,
 			},
@@ -142,6 +154,14 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
+	// Retrieve write-only values from config (not plan)
+	var config integrationResourceModel
+	diags = req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Create new integration
 	createReq := client.CreateIntegrationRequest{
 		Name:         plan.Name.ValueString(),
@@ -152,10 +172,40 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		createReq.Slug = plan.Slug.ValueString()
 	}
 
-	if !plan.Key.IsNull() && !plan.Key.IsUnknown() {
+	// Validate: cannot use both key and key_wo
+	hasKey := !plan.Key.IsNull() && !plan.Key.IsUnknown()
+	hasKeyWO := !config.KeyWriteOnly.IsNull() && !config.KeyWriteOnly.IsUnknown()
+
+	if hasKey && hasKeyWO {
+		resp.Diagnostics.AddError(
+			"Conflicting API Key Attributes",
+			"Cannot specify both 'key' and 'key_wo'. Choose one: 'key' (stored in state, simpler) or 'key_wo' (write-only, enhanced security).",
+		)
+		return
+	}
+
+	// Warn if key_wo is used without key_version (key cannot be updated after creation)
+	if hasKeyWO && plan.KeyVersion.IsNull() {
+		resp.Diagnostics.AddWarning(
+			"Missing key_version",
+			"Using key_wo without key_version means the API key cannot be updated after initial creation. Consider adding key_version to enable key updates.",
+		)
+	}
+
+	// Use key_wo (write-only) if provided, otherwise fall back to key
+	if hasKeyWO {
+		tflog.Debug(ctx, "Creating integration with write-only key (key_wo)", map[string]interface{}{
+			"integration_name": plan.Name.ValueString(),
+		})
+		createReq.Key = config.KeyWriteOnly.ValueString()
+	} else if hasKey {
+		tflog.Debug(ctx, "Creating integration with key", map[string]interface{}{
+			"integration_name": plan.Name.ValueString(),
+		})
 		createReq.Key = plan.Key.ValueString()
 	}
 
+	// Parse configurations JSON if provided
 	if !plan.Configurations.IsNull() && !plan.Configurations.IsUnknown() {
 		var configurations map[string]interface{}
 		if err := json.Unmarshal([]byte(plan.Configurations.ValueString()), &configurations); err != nil {
@@ -268,6 +318,14 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	// Retrieve write-only values from config (not plan)
+	var config integrationResourceModel
+	diags = req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Get current state for the slug
 	var state integrationResourceModel
 	diags = req.State.Get(ctx, &state)
@@ -281,10 +339,54 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 		Name: plan.Name.ValueString(),
 	}
 
-	if !plan.Key.IsNull() && !plan.Key.IsUnknown() {
+	// Validate: cannot use both key and key_wo
+	hasKey := !plan.Key.IsNull() && !plan.Key.IsUnknown()
+	hasKeyWO := !config.KeyWriteOnly.IsNull() && !config.KeyWriteOnly.IsUnknown()
+
+	if hasKey && hasKeyWO {
+		resp.Diagnostics.AddError(
+			"Conflicting API Key Attributes",
+			"Cannot specify both 'key' and 'key_wo'. Choose one: 'key' (stored in state, simpler) or 'key_wo' (write-only, enhanced security).",
+		)
+		return
+	}
+
+	// Warn if key_wo is used without key_version (key cannot be updated)
+	if hasKeyWO && plan.KeyVersion.IsNull() {
+		resp.Diagnostics.AddWarning(
+			"Missing key_version",
+			"Using key_wo without key_version means the API key cannot be updated after initial creation. Consider adding key_version to enable key updates.",
+		)
+	}
+
+	// Handle key updates:
+	// - For key_wo (write-only): only send if key_version changed (trigger-based)
+	// - For key: send if provided
+	if hasKeyWO {
+		// Using write-only key - check if key_version changed
+		keyVersionChanged := !plan.KeyVersion.Equal(state.KeyVersion)
+		if keyVersionChanged {
+			tflog.Debug(ctx, "Updating integration key (key_version changed)", map[string]interface{}{
+				"integration_name": plan.Name.ValueString(),
+				"old_key_version":  state.KeyVersion.ValueInt64(),
+				"new_key_version":  plan.KeyVersion.ValueInt64(),
+			})
+			updateReq.Key = config.KeyWriteOnly.ValueString()
+		} else {
+			tflog.Debug(ctx, "Skipping key update (key_version unchanged)", map[string]interface{}{
+				"integration_name": plan.Name.ValueString(),
+				"key_version":      plan.KeyVersion.ValueInt64(),
+			})
+		}
+	} else if hasKey {
+		// Using key (stored in state) - send if provided
+		tflog.Debug(ctx, "Updating integration with key", map[string]interface{}{
+			"integration_name": plan.Name.ValueString(),
+		})
 		updateReq.Key = plan.Key.ValueString()
 	}
 
+	// Parse configurations JSON if provided
 	if !plan.Configurations.IsNull() && !plan.Configurations.IsUnknown() {
 		var configurations map[string]interface{}
 		if err := json.Unmarshal([]byte(plan.Configurations.ValueString()), &configurations); err != nil {

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Integration Model Access** - New resource and data source for managing model access per integration:
+  - `portkey_integration_model_access` - Enable/disable specific models for an integration with optional custom pricing
+  - `portkey_integration_models` - Data source to list all models available for an integration
+  - Support for custom/fine-tuned models (`is_custom`, `is_finetune`, `base_model_slug`)
+  - Support for custom pricing configuration (`pricing_config` with `pay_as_you_go` token prices)
+  - Built-in models are disabled on delete; custom models are fully removed
+
+### Documentation
+- Added documentation for integration model access resource and data source
+
 ## [0.2.8] - 2026-01-26
 
 ### Added

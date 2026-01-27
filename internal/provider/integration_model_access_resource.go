@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/float64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -13,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
@@ -27,10 +30,6 @@ var (
 
 // Type definitions for nested attributes
 var (
-	tokenPriceAttrTypes = map[string]attr.Type{
-		"price": types.Float64Type,
-	}
-
 	payAsYouGoAttrTypes = map[string]attr.Type{
 		"request_token_price":  types.Float64Type,
 		"response_token_price": types.Float64Type,
@@ -44,7 +43,6 @@ var (
 	}
 
 	pricingConfigObjectType = types.ObjectType{AttrTypes: pricingConfigAttrTypes}
-	payAsYouGoObjectType    = types.ObjectType{AttrTypes: payAsYouGoAttrTypes}
 )
 
 // NewIntegrationModelAccessResource is a helper function to simplify the provider implementation.
@@ -141,6 +139,9 @@ func (r *integrationModelAccessResource) Schema(_ context.Context, _ resource.Sc
 					"type": schema.StringAttribute{
 						Description: "Pricing type: 'static' for fixed pricing.",
 						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("static"),
+						},
 					},
 					"pay_as_you_go": schema.SingleNestedAttribute{
 						Description: "Pay-as-you-go pricing configuration.",
@@ -149,10 +150,16 @@ func (r *integrationModelAccessResource) Schema(_ context.Context, _ resource.Sc
 							"request_token_price": schema.Float64Attribute{
 								Description: "Price per request token (input).",
 								Optional:    true,
+								Validators: []validator.Float64{
+									float64validator.AtLeast(0),
+								},
 							},
 							"response_token_price": schema.Float64Attribute{
 								Description: "Price per response token (output).",
 								Optional:    true,
+								Validators: []validator.Float64{
+									float64validator.AtLeast(0),
+								},
 							},
 						},
 					},

@@ -128,3 +128,25 @@ terraform import portkey_integration_model_access.example integration-slug/gpt-4
 
 - **Built-in models**: When deleted from Terraform, the model is disabled (`enabled=false`) but not removed from the integration.
 - **Custom models** (`is_custom=true`): When deleted from Terraform, the model is fully removed from the integration.
+
+## Concurrent Updates
+
+When managing multiple `portkey_integration_model_access` resources for the same integration, be aware that the underlying API uses bulk operations. If multiple model access resources for the same integration are modified concurrently during a Terraform apply, there is a potential for race conditions.
+
+To avoid issues, consider using `depends_on` to serialize updates to the same integration:
+
+```terraform
+resource "portkey_integration_model_access" "gpt4" {
+  integration_id = portkey_integration.openai.slug
+  model_slug     = "gpt-4"
+  enabled        = true
+}
+
+resource "portkey_integration_model_access" "gpt35" {
+  integration_id = portkey_integration.openai.slug
+  model_slug     = "gpt-3.5-turbo"
+  enabled        = true
+
+  depends_on = [portkey_integration_model_access.gpt4]
+}
+```

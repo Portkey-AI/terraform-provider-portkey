@@ -1530,8 +1530,8 @@ type IntegrationWorkspaceRateLimits struct {
 
 // IntegrationWorkspace represents workspace access configuration for an integration
 type IntegrationWorkspace struct {
-	ID          string                           `json:"id"`
-	Enabled     bool                             `json:"enabled"`
+	ID          string                            `json:"id"`
+	Enabled     bool                              `json:"enabled"`
 	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
 	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
 }
@@ -1544,16 +1544,16 @@ type IntegrationWorkspacesResponse struct {
 
 // WorkspaceUpdateRequest represents a single workspace update in a bulk request
 type WorkspaceUpdateRequest struct {
-	ID          string                           `json:"id"`
-	Enabled     bool                             `json:"enabled"`
+	ID          string                            `json:"id"`
+	Enabled     bool                              `json:"enabled"`
 	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
 	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
-	ResetUsage  bool                             `json:"reset_usage,omitempty"`
+	ResetUsage  bool                              `json:"reset_usage,omitempty"`
 }
 
 // GlobalWorkspaceAccess represents global workspace access settings
 type GlobalWorkspaceAccess struct {
-	Enabled     bool                             `json:"enabled"`
+	Enabled     bool                              `json:"enabled"`
 	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
 	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
 }
@@ -1610,4 +1610,105 @@ func (c *Client) UpdateIntegrationWorkspace(ctx context.Context, integrationSlug
 		Workspaces: []WorkspaceUpdateRequest{workspace},
 	}
 	return c.UpdateIntegrationWorkspaces(ctx, integrationSlug, req)
+}
+
+// TokenPrice represents a token price configuration
+type TokenPrice struct {
+	Price float64 `json:"price"`
+}
+
+// PayAsYouGoPricing represents pay-as-you-go pricing configuration
+type PayAsYouGoPricing struct {
+	RequestToken  *TokenPrice `json:"request_token,omitempty"`
+	ResponseToken *TokenPrice `json:"response_token,omitempty"`
+}
+
+// ModelPricingConfig represents pricing configuration for a model
+type ModelPricingConfig struct {
+	Type       string             `json:"type"` // "static" or other pricing types
+	PayAsYouGo *PayAsYouGoPricing `json:"pay_as_you_go,omitempty"`
+}
+
+// IntegrationModel represents a model available through an integration
+type IntegrationModel struct {
+	Slug          string              `json:"slug"`
+	Enabled       bool                `json:"enabled"`
+	IsCustom      bool                `json:"is_custom,omitempty"`
+	IsFinetune    bool                `json:"is_finetune,omitempty"`
+	BaseModelSlug string              `json:"base_model_slug,omitempty"`
+	PricingConfig *ModelPricingConfig `json:"pricing_config,omitempty"`
+}
+
+// IntegrationModelsResponse represents the response from listing integration models
+type IntegrationModelsResponse struct {
+	AllowAllModels bool               `json:"allow_all_models"`
+	Models         []IntegrationModel `json:"models"`
+}
+
+// BulkUpdateModelsRequest represents the request to bulk update model access
+type BulkUpdateModelsRequest struct {
+	AllowAllModels *bool              `json:"allow_all_models,omitempty"`
+	Models         []IntegrationModel `json:"models"`
+}
+
+// DeleteModelsRequest represents the request to delete custom models
+type DeleteModelsRequest struct {
+	Models []string `json:"models"`
+}
+
+// GetIntegrationModels retrieves all models for an integration
+func (c *Client) GetIntegrationModels(ctx context.Context, integrationSlug string) (*IntegrationModelsResponse, error) {
+	path := fmt.Sprintf("/integrations/%s/models", integrationSlug)
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response IntegrationModelsResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetIntegrationModel retrieves a specific model's access for an integration
+func (c *Client) GetIntegrationModel(ctx context.Context, integrationSlug, modelSlug string) (*IntegrationModel, error) {
+	models, err := c.GetIntegrationModels(ctx, integrationSlug)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, m := range models.Models {
+		if m.Slug == modelSlug {
+			return &m, nil
+		}
+	}
+
+	return nil, fmt.Errorf("model %s not found for integration %s", modelSlug, integrationSlug)
+}
+
+// UpdateIntegrationModels bulk updates model access for an integration
+func (c *Client) UpdateIntegrationModels(ctx context.Context, integrationSlug string, req BulkUpdateModelsRequest) error {
+	path := fmt.Sprintf("/integrations/%s/models", integrationSlug)
+	_, err := c.doRequest(ctx, http.MethodPut, path, req)
+	return err
+}
+
+// UpdateIntegrationModel updates a single model's access for an integration using GET-modify-PUT pattern
+func (c *Client) UpdateIntegrationModel(ctx context.Context, integrationSlug string, model IntegrationModel) error {
+	req := BulkUpdateModelsRequest{
+		Models: []IntegrationModel{model},
+	}
+	return c.UpdateIntegrationModels(ctx, integrationSlug, req)
+}
+
+// DeleteIntegrationModels deletes custom models from an integration
+func (c *Client) DeleteIntegrationModels(ctx context.Context, integrationSlug string, modelSlugs []string) error {
+	path := fmt.Sprintf("/integrations/%s/models", integrationSlug)
+	req := DeleteModelsRequest{
+		Models: modelSlugs,
+	}
+	_, err := c.doRequest(ctx, http.MethodDelete, path, req)
+	return err
 }

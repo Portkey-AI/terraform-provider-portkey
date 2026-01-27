@@ -82,6 +82,32 @@ func TestAccIntegrationModelAccessResource_withPricing(t *testing.T) {
 	})
 }
 
+// TestAccIntegrationModelAccessResource_updatePricing tests updating pricing configuration.
+func TestAccIntegrationModelAccessResource_updatePricing(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with initial pricing
+			{
+				Config: testAccIntegrationModelAccessResourceConfigWithPricing(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_integration_model_access.test", "pricing_config.pay_as_you_go.request_token_price", "0.03"),
+					resource.TestCheckResourceAttr("portkey_integration_model_access.test", "pricing_config.pay_as_you_go.response_token_price", "0.06"),
+				),
+			},
+			// Update pricing values
+			{
+				Config: testAccIntegrationModelAccessResourceConfigWithUpdatedPricing(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_integration_model_access.test", "pricing_config.pay_as_you_go.request_token_price", "0.05"),
+					resource.TestCheckResourceAttr("portkey_integration_model_access.test", "pricing_config.pay_as_you_go.response_token_price", "0.10"),
+				),
+			},
+		},
+	})
+}
+
 // TestAccIntegrationModelAccessResource_customModel tests custom/fine-tuned model creation.
 func TestAccIntegrationModelAccessResource_customModel(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-custom")
@@ -184,6 +210,35 @@ resource "portkey_integration_model_access" "test" {
     pay_as_you_go = {
       request_token_price  = 0.03
       response_token_price = 0.06
+    }
+  }
+}
+`
+}
+
+// testAccIntegrationModelAccessResourceConfigWithUpdatedPricing creates model access with updated pricing
+func testAccIntegrationModelAccessResourceConfigWithUpdatedPricing() string {
+	return `
+provider "portkey" {}
+
+# Get existing integrations from the organization
+data "portkey_integrations" "all" {}
+
+# Get models available for the first integration
+data "portkey_integration_models" "test" {
+  integration_id = data.portkey_integrations.all.integrations[0].slug
+}
+
+resource "portkey_integration_model_access" "test" {
+  integration_id = data.portkey_integrations.all.integrations[0].slug
+  model_slug     = data.portkey_integration_models.test.models[0].slug
+  enabled        = true
+
+  pricing_config = {
+    type = "static"
+    pay_as_you_go = {
+      request_token_price  = 0.05
+      response_token_price = 0.10
     }
   }
 }

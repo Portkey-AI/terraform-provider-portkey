@@ -383,6 +383,8 @@ resource "portkey_integration" "bedrock_keys" {
 
 ##### Azure OpenAI
 
+Azure OpenAI requires a specific configuration format with authentication mode and deployment details:
+
 ```hcl
 resource "portkey_integration" "azure_openai" {
   name           = "Azure OpenAI"
@@ -390,9 +392,116 @@ resource "portkey_integration" "azure_openai" {
   key            = var.azure_api_key
 
   configurations = jsonencode({
-    resource_name = "my-azure-resource"
-    deployment_id = "gpt-4-deployment"
-    api_version   = "2024-02-15-preview"
+    azure_auth_mode     = "default"  # Required: "default", "entra", or "managed"
+    azure_resource_name = "my-azure-resource"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"  # Model type: gpt-4, gpt-35-turbo, etc.
+        is_default            = true
+      }
+    ]
+  })
+}
+```
+
+**Azure OpenAI Configuration Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `azure_auth_mode` | String | Yes | Authentication mode: "default", "entra", or "managed" |
+| `azure_resource_name` | String | Yes | Your Azure OpenAI resource name |
+| `azure_deployment_config` | Array | Yes | Array of deployment configurations (min 1) |
+| `azure_deployment_config[].azure_deployment_name` | String | Yes | Deployment name from Azure OpenAI Studio |
+| `azure_deployment_config[].azure_api_version` | String | Yes | API version (e.g., "2024-02-15-preview"), max 30 chars |
+| `azure_deployment_config[].azure_model_slug` | String | Yes | Model identifier (e.g., "gpt-4", "gpt-35-turbo") |
+| `azure_deployment_config[].is_default` | Boolean | No | Set to true for the default deployment |
+| `azure_deployment_config[].alias` | String | No* | Alias for the deployment (*required if not default) |
+| `azure_entra_tenant_id` | String | For entra | Azure AD tenant ID (required for entra auth) |
+| `azure_entra_client_id` | String | For entra | Azure AD client ID (required for entra auth) |
+| `azure_entra_client_secret` | String | For entra | Azure AD client secret (required for entra auth) |
+| `azure_managed_client_id` | String | For managed | Managed identity client ID (optional for managed auth) |
+
+**Authentication Modes:**
+
+- `default` - Uses the API key provided in the `key` field
+- `entra` - Uses Microsoft Entra ID for authentication
+- `managed` - Uses Azure Managed Identity for authentication
+
+**Multiple Deployments Example (API Key Auth):**
+
+```hcl
+resource "portkey_integration" "azure_openai_multi" {
+  name           = "Azure OpenAI Multi-Model"
+  ai_provider_id = "azure-openai"
+  key            = var.azure_api_key
+
+  configurations = jsonencode({
+    azure_auth_mode     = "default"
+    azure_resource_name = "my-azure-resource"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      },
+      {
+        alias                 = "gpt35"
+        azure_deployment_name = "gpt-35-turbo-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-35-turbo"
+      }
+    ]
+  })
+}
+```
+
+**Microsoft Entra ID Authentication Example:**
+
+```hcl
+resource "portkey_integration" "azure_openai_entra" {
+  name           = "Azure OpenAI (Entra ID)"
+  ai_provider_id = "azure-openai"
+
+  configurations = jsonencode({
+    azure_auth_mode           = "entra"
+    azure_resource_name       = "my-azure-resource"
+    azure_entra_tenant_id     = var.azure_tenant_id
+    azure_entra_client_id     = var.azure_client_id
+    azure_entra_client_secret = var.azure_client_secret
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      }
+    ]
+  })
+}
+```
+
+**Managed Identity Authentication Example:**
+
+```hcl
+resource "portkey_integration" "azure_openai_managed" {
+  name           = "Azure OpenAI (Managed Identity)"
+  ai_provider_id = "azure-openai"
+
+  configurations = jsonencode({
+    azure_auth_mode          = "managed"
+    azure_resource_name      = "my-azure-resource"
+    azure_managed_client_id  = var.azure_managed_client_id  # Optional
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      }
+    ]
   })
 }
 ```

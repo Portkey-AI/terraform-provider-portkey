@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-01-28
+
+### Fixed
+- **Azure OpenAI Integration Configuration** - Fixed incorrect field names in documentation that caused 400 "Invalid request" errors:
+  - Changed `resource_name` to `azure_resource_name`
+  - Changed flat `deployment_id`/`api_version` to nested `azure_deployment_config` array structure
+  - Added required `azure_auth_mode` field (values: "default", "entra", "managed")
+  - Added required `azure_model_slug` field in deployment config
+
+### Added
+- **Azure OpenAI Authentication Modes** - Full documentation and examples for all 3 authentication methods:
+  - `default` - API key authentication
+  - `entra` - Microsoft Entra ID (Azure AD) authentication
+  - `managed` - Azure Managed Identity authentication
+- **Azure OpenAI Acceptance Tests** - 5 new tests to prevent future regressions:
+  - Basic configuration with default auth
+  - Multiple deployments
+  - Entra ID authentication
+  - Managed Identity authentication
+  - Configuration updates
+
 ## [0.2.9] - 2026-01-27
 
 ### Added
@@ -168,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.6...v0.2.7

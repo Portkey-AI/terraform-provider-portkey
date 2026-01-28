@@ -22,7 +22,7 @@ Manages a Portkey integration. Integrations connect Portkey to AI providers like
 
 ### Optional
 
-- `configurations` (String, Sensitive) Provider-specific configurations as JSON. For AWS Bedrock with IAM Role, use: jsonencode({aws_role_arn = "arn:aws:iam::...", aws_region = "us-east-1"}). For Azure OpenAI: jsonencode({resource_name = "...", deployment_id = "...", api_version = "..."}). This is write-only and will not be returned by the API.
+- `configurations` (String, Sensitive) Provider-specific configurations as JSON. For AWS Bedrock with IAM Role, use: jsonencode({aws_role_arn = "arn:aws:iam::...", aws_region = "us-east-1"}). For Azure OpenAI: jsonencode({azure_auth_mode = "default", azure_resource_name = "...", azure_deployment_config = [{azure_deployment_name = "...", azure_api_version = "...", azure_model_slug = "gpt-4", is_default = true}]}). This is write-only and will not be returned by the API.
 - `description` (String) Optional description of the integration.
 - `key` (String, Sensitive) API key for the provider. This is write-only and will not be returned by the API.
 - `slug` (String) URL-friendly identifier for the integration. Auto-generated if not provided.

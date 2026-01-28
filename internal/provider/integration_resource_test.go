@@ -265,6 +265,279 @@ resource "portkey_integration" "test" {
 `, name)
 }
 
+func TestAccIntegrationResource_withAzureOpenAIConfigurations(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureOpenAI(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureOpenAI(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-openai"
+  key            = "test-azure-api-key-12345"
+
+  configurations = jsonencode({
+    azure_auth_mode     = "default"
+    azure_resource_name = "test-azure-resource"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      }
+    ]
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureOpenAIMultipleDeployments(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-multi")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureOpenAIMultiple(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureOpenAIMultiple(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-openai"
+  key            = "test-azure-api-key-12345"
+
+  configurations = jsonencode({
+    azure_auth_mode     = "default"
+    azure_resource_name = "test-azure-resource"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      },
+      {
+        alias                 = "gpt35"
+        azure_deployment_name = "gpt-35-turbo-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-35-turbo"
+      }
+    ]
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureOpenAIEntraAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-entra")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureOpenAIEntra(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureOpenAIEntra(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-openai"
+
+  configurations = jsonencode({
+    azure_auth_mode           = "entra"
+    azure_resource_name       = "test-azure-resource"
+    azure_entra_tenant_id     = "test-tenant-id-12345"
+    azure_entra_client_id     = "test-client-id-12345"
+    azure_entra_client_secret = "test-client-secret-12345"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      }
+    ]
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureOpenAIManagedAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-managed")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureOpenAIManaged(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureOpenAIManaged(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-openai"
+
+  configurations = jsonencode({
+    azure_auth_mode         = "managed"
+    azure_resource_name     = "test-azure-resource"
+    azure_managed_client_id = "test-managed-client-id-12345"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      }
+    ]
+  })
+}
+`, name)
+}
+
+// Test updating Azure OpenAI configuration (add a deployment)
+func TestAccIntegrationResource_updateAzureOpenAIConfig(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-update")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with single deployment
+			{
+				Config: testAccIntegrationResourceConfigAzureOpenAISingle(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+				),
+			},
+			// Update: add another deployment
+			{
+				Config: testAccIntegrationResourceConfigAzureOpenAIUpdated(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName+"-updated"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigAzureOpenAISingle(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-openai"
+  key            = "test-azure-api-key-12345"
+
+  configurations = jsonencode({
+    azure_auth_mode     = "default"
+    azure_resource_name = "test-azure-resource"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      }
+    ]
+  })
+}
+`, name)
+}
+
+func testAccIntegrationResourceConfigAzureOpenAIUpdated(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = "%[1]s-updated"
+  ai_provider_id = "azure-openai"
+  key            = "test-azure-api-key-12345"
+
+  configurations = jsonencode({
+    azure_auth_mode     = "default"
+    azure_resource_name = "test-azure-resource-updated"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      },
+      {
+        alias                 = "gpt35"
+        azure_deployment_name = "gpt-35-turbo-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-35-turbo"
+      }
+    ]
+  })
+}
+`, name)
+}
+
 func TestAccIntegrationResource_conflictKeyAndKeyWO(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-conflict")
 

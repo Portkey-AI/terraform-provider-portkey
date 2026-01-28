@@ -100,7 +100,7 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Optional:    true,
 			},
 			"configurations": schema.StringAttribute{
-				Description: "Provider-specific configurations as JSON. For OpenAI: jsonencode({openai_organization = \"org-...\", openai_project = \"proj-...\"}). For AWS Bedrock: jsonencode({aws_role_arn = \"arn:aws:iam::...\", aws_region = \"us-east-1\"}). For Azure OpenAI: jsonencode({resource_name = \"...\", deployment_id = \"...\", api_version = \"...\"}).",
+				Description: "Provider-specific configurations as JSON. For OpenAI: jsonencode({openai_organization = \"org-...\", openai_project = \"proj-...\"}). For AWS Bedrock: jsonencode({aws_role_arn = \"arn:aws:iam::...\", aws_region = \"us-east-1\"}). For Azure OpenAI: jsonencode({azure_auth_mode = \"default\", azure_resource_name = \"...\", azure_deployment_config = [{azure_deployment_name = \"...\", azure_api_version = \"...\", azure_model_slug = \"gpt-4\", is_default = true}]}).",
 				Optional:    true,
 				Sensitive:   true,
 			},

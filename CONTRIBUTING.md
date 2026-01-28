@@ -212,6 +212,56 @@ func TestAccWorkspaceResource(t *testing.T) {
 - Document breaking changes
 - Keep CHANGELOG.md updated
 
+## Releasing
+
+### Pre-release Checklist
+
+1. **Merge all PRs** for the release
+2. **Verify CI passes** on main branch
+
+### Release Steps
+
+```bash
+# 1. Checkout and pull latest main
+git checkout main && git pull
+
+# 2. Update CHANGELOG.md
+#    - Change [Unreleased] to [X.Y.Z] with today's date
+#    - Add new empty [Unreleased] section
+#    - Update comparison links at bottom of file
+
+# 3. Commit changelog
+git add CHANGELOG.md
+git commit -m "chore: update CHANGELOG for vX.Y.Z"
+git push origin main
+
+# 4. Create and push tag (triggers release workflow)
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+
+# 5. Monitor release workflow
+gh run list --workflow=release.yml --limit 1
+gh run watch <run-id> --exit-status
+
+# 6. Verify release
+gh release view vX.Y.Z
+```
+
+### Version Numbering
+
+Follow [Semantic Versioning](https://semver.org/):
+- **MAJOR** (1.0.0): Breaking changes
+- **MINOR** (0.X.0): New features, backwards compatible
+- **PATCH** (0.0.X): Bug fixes, backwards compatible
+
+### What the Release Workflow Does
+
+The GitHub Action (`.github/workflows/release.yml`) automatically:
+1. Builds binaries for all platforms (darwin, linux, windows)
+2. Signs artifacts with GPG
+3. Creates GitHub release with changelog
+4. Publishes to Terraform Registry
+
 ## Getting Help
 
 - **Questions**: Open a [GitHub Discussion](https://github.com/Portkey-AI/terraform-provider-portkey/discussions)

@@ -1,16 +1,16 @@
 # Resource x Operation Matrix
 
-*Last updated: December 2024*
+*Last updated: February 2026*
 
 ## Summary
 
 | Category | Resources | Data Sources | Test Status |
 |----------|:---------:|:------------:|-------------|
 | Organization | 3 | 4 | ⚠️ Workspace delete blocked |
-| AI Gateway | 4 | 8 | ✅ All passing |
+| AI Gateway | 5 | 10 | ✅ All passing |
 | Governance | 3 | 6 | ✅ All passing |
 | Access Control | 1 | 2 | ✅ All passing |
-| **Total** | **11** | **20** | **39/46 passing** |
+| **Total** | **12** | **22** | **41/48 passing** |
 
 ## Provider Resources
 
@@ -24,6 +24,7 @@
 | `portkey_provider` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_config` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_prompt` | ✅ | ✅ | ⚠️ | ✅ | ✅ | Template updates need versions | ✅ Passing |
+| `portkey_prompt_collection` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_guardrail` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_usage_limits_policy` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_rate_limits_policy` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
@@ -46,6 +47,8 @@
 | `portkey_configs` | - | ✅ | Working | ✅ Passing |
 | `portkey_prompt` | ✅ | - | Working | ✅ Passing |
 | `portkey_prompts` | - | ✅ | Working | ✅ Passing |
+| `portkey_prompt_collection` | ✅ | - | Working | ✅ Passing |
+| `portkey_prompt_collections` | - | ✅ | Working | ✅ Passing |
 | `portkey_guardrail` | ✅ | - | Working | ✅ Passing |
 | `portkey_guardrails` | - | ✅ | Working | ✅ Passing |
 | `portkey_usage_limits_policy` | ✅ | - | Working | ✅ Passing |

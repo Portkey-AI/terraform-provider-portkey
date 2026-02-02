@@ -1712,3 +1712,113 @@ func (c *Client) DeleteIntegrationModels(ctx context.Context, integrationSlug st
 	_, err := c.doRequest(ctx, http.MethodDelete, path, req)
 	return err
 }
+
+// ============================================================================
+// Prompt Collections
+// ============================================================================
+
+// PromptCollection represents a Portkey prompt collection
+type PromptCollection struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	WorkspaceID        string `json:"workspace_id"`
+	Slug               string `json:"slug,omitempty"`
+	ParentCollectionID string `json:"parent_collection_id,omitempty"`
+	IsDefault          int    `json:"is_default"`
+	Status             string `json:"status"`
+	CreatedAt          string `json:"created_at"`
+	LastUpdatedAt      string `json:"last_updated_at"`
+}
+
+// CreatePromptCollectionRequest represents the request to create a prompt collection
+type CreatePromptCollectionRequest struct {
+	Name               string `json:"name"`
+	WorkspaceID        string `json:"workspace_id"`
+	ParentCollectionID string `json:"parent_collection_id,omitempty"`
+}
+
+// CreatePromptCollectionResponse represents the response from creating a prompt collection
+type CreatePromptCollectionResponse struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+}
+
+// UpdatePromptCollectionRequest represents the request to update a prompt collection
+type UpdatePromptCollectionRequest struct {
+	Name string `json:"name,omitempty"`
+}
+
+// CreatePromptCollection creates a new prompt collection
+func (c *Client) CreatePromptCollection(ctx context.Context, req CreatePromptCollectionRequest) (*CreatePromptCollectionResponse, error) {
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/collections", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response CreatePromptCollectionResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetPromptCollection retrieves a prompt collection by ID
+func (c *Client) GetPromptCollection(ctx context.Context, id string) (*PromptCollection, error) {
+	respBody, err := c.doRequest(ctx, http.MethodGet, "/collections/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var collection PromptCollection
+	if err := json.Unmarshal(respBody, &collection); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &collection, nil
+}
+
+// ListPromptCollections retrieves all prompt collections, optionally filtered by workspace
+func (c *Client) ListPromptCollections(ctx context.Context, workspaceID string) ([]PromptCollection, error) {
+	path := "/collections"
+	if workspaceID != "" {
+		path = fmt.Sprintf("/collections?workspace_id=%s", workspaceID)
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Data  []PromptCollection `json:"data"`
+		Total int                `json:"total"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return response.Data, nil
+}
+
+// UpdatePromptCollection updates a prompt collection
+func (c *Client) UpdatePromptCollection(ctx context.Context, id string, req UpdatePromptCollectionRequest) (*PromptCollection, error) {
+	_, err := c.doRequest(ctx, http.MethodPut, "/collections/"+id, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch updated collection details since update may return empty response
+	collection, err := c.GetPromptCollection(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("collection updated but failed to retrieve details: %w", err)
+	}
+
+	return collection, nil
+}
+
+// DeletePromptCollection deletes a prompt collection
+func (c *Client) DeletePromptCollection(ctx context.Context, id string) error {
+	_, err := c.doRequest(ctx, http.MethodDelete, "/collections/"+id, nil)
+	return err
+}

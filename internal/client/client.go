@@ -2051,4 +2051,3 @@ func (c *Client) UpdateMcpIntegrationWorkspace(ctx context.Context, id string, u
 	_, err := c.doRequest(ctx, http.MethodPut, path, req)
 	return err
 }
-

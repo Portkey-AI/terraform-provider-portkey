@@ -1053,12 +1053,15 @@ type CreatePromptResponse struct {
 	VersionID string `json:"version_id"`
 }
 
-// UpdatePromptRequest represents the request to update a prompt
+// UpdatePromptRequest represents the request to update a prompt.
+// Note: parameters, model, virtual_key, and is_raw_template use non-omitempty
+// tags or pointer types to ensure they're included in version-creating updates.
+// The API requires these fields when creating a new version.
 type UpdatePromptRequest struct {
 	Name               string                 `json:"name,omitempty"`
 	CollectionID       string                 `json:"collection_id,omitempty"`
 	String             string                 `json:"string,omitempty"`
-	Parameters         map[string]interface{} `json:"parameters,omitempty"`
+	Parameters         map[string]interface{} `json:"parameters"`
 	Model              string                 `json:"model,omitempty"`
 	VirtualKey         string                 `json:"virtual_key,omitempty"`
 	VersionDescription string                 `json:"version_description,omitempty"`
@@ -1163,6 +1166,137 @@ func (c *Client) MakePromptVersionDefault(ctx context.Context, slugOrID string, 
 // DeletePrompt deletes a prompt
 func (c *Client) DeletePrompt(ctx context.Context, slugOrID string) error {
 	_, err := c.doRequest(ctx, http.MethodDelete, "/prompts/"+slugOrID, nil)
+	return err
+}
+
+// PromptPartial represents a Portkey prompt partial
+type PromptPartial struct {
+	ID                         string    `json:"id"`
+	Slug                       string    `json:"slug"`
+	Name                       string    `json:"name"`
+	String                     string    `json:"string"`
+	Status                     string    `json:"status"`
+	Version                    int       `json:"version"`
+	PromptPartialVersionID     string    `json:"prompt_partial_version_id,omitempty"`
+	PromptPartialVersionStatus string    `json:"prompt_partial_version_status,omitempty"`
+	VersionDescription         string    `json:"version_description,omitempty"`
+	CollectionID               string    `json:"collection_id,omitempty"`
+	CreatedAt                  time.Time `json:"created_at"`
+	UpdatedAt                  time.Time `json:"last_updated_at"`
+}
+
+// CreatePromptPartialRequest represents the request to create a prompt partial
+type CreatePromptPartialRequest struct {
+	Name               string `json:"name"`
+	String             string `json:"string"`
+	WorkspaceID        string `json:"workspace_id,omitempty"`
+	VersionDescription string `json:"version_description,omitempty"`
+}
+
+// CreatePromptPartialResponse represents the response from creating a prompt partial
+type CreatePromptPartialResponse struct {
+	ID        string `json:"id"`
+	Slug      string `json:"slug"`
+	VersionID string `json:"version_id"`
+}
+
+// UpdatePromptPartialRequest represents the request to update a prompt partial
+type UpdatePromptPartialRequest struct {
+	Name               string `json:"name,omitempty"`
+	String             string `json:"string,omitempty"`
+	VersionDescription string `json:"version_description,omitempty"`
+}
+
+// UpdatePromptPartialResponse represents the response from updating a prompt partial
+type UpdatePromptPartialResponse struct {
+	ID                     string `json:"id,omitempty"`
+	Slug                   string `json:"slug,omitempty"`
+	PromptPartialVersionID string `json:"prompt_partial_version_id,omitempty"`
+}
+
+// CreatePromptPartial creates a new prompt partial
+func (c *Client) CreatePromptPartial(ctx context.Context, req CreatePromptPartialRequest) (*CreatePromptPartialResponse, error) {
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/prompts/partials", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response CreatePromptPartialResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetPromptPartial retrieves a prompt partial by slug or ID
+func (c *Client) GetPromptPartial(ctx context.Context, slugOrID string, version string) (*PromptPartial, error) {
+	path := "/prompts/partials/" + slugOrID
+	if version != "" {
+		path += "?version=" + version
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var partial PromptPartial
+	if err := json.Unmarshal(respBody, &partial); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &partial, nil
+}
+
+// ListPromptPartials retrieves all prompt partials
+func (c *Client) ListPromptPartials(ctx context.Context, workspaceID string) ([]PromptPartial, error) {
+	path := "/prompts/partials"
+	if workspaceID != "" {
+		path += "?workspace_id=" + workspaceID
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Data []PromptPartial `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return response.Data, nil
+}
+
+// UpdatePromptPartial updates a prompt partial
+func (c *Client) UpdatePromptPartial(ctx context.Context, slugOrID string, req UpdatePromptPartialRequest) (*UpdatePromptPartialResponse, error) {
+	respBody, err := c.doRequest(ctx, http.MethodPut, "/prompts/partials/"+slugOrID, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response UpdatePromptPartialResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		// Name-only updates may return empty JSON {}
+		return &UpdatePromptPartialResponse{}, nil
+	}
+
+	return &response, nil
+}
+
+// MakePromptPartialVersionDefault makes a specific version the default
+func (c *Client) MakePromptPartialVersionDefault(ctx context.Context, slugOrID string, version int) error {
+	req := map[string]int{"version": version}
+	_, err := c.doRequest(ctx, http.MethodPut, "/prompts/partials/"+slugOrID+"/makeDefault", req)
+	return err
+}
+
+// DeletePromptPartial deletes a prompt partial
+func (c *Client) DeletePromptPartial(ctx context.Context, slugOrID string) error {
+	_, err := c.doRequest(ctx, http.MethodDelete, "/prompts/partials/"+slugOrID, nil)
 	return err
 }
 

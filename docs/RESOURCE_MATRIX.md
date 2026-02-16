@@ -7,11 +7,11 @@
 | Category | Resources | Data Sources | Test Status |
 |----------|:---------:|:------------:|-------------|
 | Organization | 3 | 4 | ⚠️ Workspace delete blocked |
-| AI Gateway | 5 | 10 | ✅ All passing |
+| AI Gateway | 6 | 12 | ✅ All passing |
 | Governance | 3 | 6 | ✅ All passing |
 | Access Control | 1 | 2 | ✅ All passing |
 | MCP Gateway | 3 | 2 | ✅ All passing (11 tests) |
-| **Total** | **15** | **24** | **All passing** |
+| **Total** | **16** | **26** | **All passing** |
 
 ## Provider Resources
 
@@ -25,6 +25,7 @@
 | `portkey_provider` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_config` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_prompt` | ✅ | ✅ | ⚠️ | ✅ | ✅ | Template updates need versions | ✅ Passing |
+| `portkey_prompt_partial` | ✅ | ✅ | ⚠️ | ✅ | ✅ | Content updates need versions | ✅ Passing |
 | `portkey_prompt_collection` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_guardrail` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_usage_limits_policy` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
@@ -51,6 +52,8 @@
 | `portkey_configs` | - | ✅ | Working | ✅ Passing |
 | `portkey_prompt` | ✅ | - | Working | ✅ Passing |
 | `portkey_prompts` | - | ✅ | Working | ✅ Passing |
+| `portkey_prompt_partial` | ✅ | - | Working | ✅ Passing |
+| `portkey_prompt_partials` | - | ✅ | Working | ✅ Passing |
 | `portkey_prompt_collection` | ✅ | - | Working | ✅ Passing |
 | `portkey_prompt_collections` | - | ✅ | Working | ✅ Passing |
 | `portkey_guardrail` | ✅ | - | Working | ✅ Passing |
@@ -182,6 +185,22 @@ PUT    /prompts/{slugOrId}/makeDefault → Set default version
 **Important Notes:**
 - API may return different values than provided (virtual_key ID → slug, adds model to parameters)
 - Template updates via API have validation issues - name updates work reliably
+
+### Prompt Partials
+```
+POST   /prompts/partials                      → Create (requires name, string)
+GET    /prompts/partials                      → List (optional ?workspace_id=xxx)
+GET    /prompts/partials/{slugOrId}           → Read (optional ?version=latest|default|N)
+PUT    /prompts/partials/{slugOrId}           → Update (name-only works; content updates create new versions)
+DELETE /prompts/partials/{slugOrId}           → Delete
+PUT    /prompts/partials/{slugOrId}/makeDefault → Set default version
+```
+
+**Prompt Partial Versioning:**
+- Same versioning model as prompts
+- Updates to content (`string` field) create a NEW version (not default)
+- Use `makeDefault` to promote a version to default
+- Reference in prompts via Mustache syntax: `{{>partial-slug}}`
 
 ### Guardrails
 ```

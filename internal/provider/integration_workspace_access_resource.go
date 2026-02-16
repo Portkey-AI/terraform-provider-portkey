@@ -26,7 +26,6 @@ var (
 	_ resource.ResourceWithImportState = &integrationWorkspaceAccessResource{}
 )
 
-
 // NewIntegrationWorkspaceAccessResource is a helper function to simplify the provider implementation.
 func NewIntegrationWorkspaceAccessResource() resource.Resource {
 	return &integrationWorkspaceAccessResource{}

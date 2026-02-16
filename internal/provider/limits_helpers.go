@@ -130,8 +130,7 @@ var (
 		"value": types.Int64Type,
 	}
 
-	apiKeyUsageLimitsObjectType = types.ObjectType{AttrTypes: apiKeyUsageLimitsAttrTypes}
-	apiKeyRateLimitsObjectType  = types.ObjectType{AttrTypes: apiKeyRateLimitsAttrTypes}
+	apiKeyRateLimitsObjectType = types.ObjectType{AttrTypes: apiKeyRateLimitsAttrTypes}
 )
 
 // apiKeyUsageLimitsToTerraform converts client *UsageLimits to a Terraform Object

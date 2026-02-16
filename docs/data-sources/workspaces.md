@@ -29,4 +29,26 @@ Read-Only:
 - `id` (String) Workspace identifier.
 - `metadata` (Map of String) Custom metadata attached to the workspace.
 - `name` (String) Name of the workspace.
+- `rate_limits` (Attributes List) Rate limits for this workspace. (see [below for nested schema](#nestedatt--workspaces--rate_limits))
 - `updated_at` (String) Timestamp when the workspace was last updated.
+- `usage_limits` (Attributes List) Usage limits for this workspace. (see [below for nested schema](#nestedatt--workspaces--usage_limits))
+
+<a id="nestedatt--workspaces--rate_limits"></a>
+### Nested Schema for `workspaces.rate_limits`
+
+Read-Only:
+
+- `type` (String) Type of rate limit.
+- `unit` (String) Rate limit unit.
+- `value` (Number) The rate limit value.
+
+
+<a id="nestedatt--workspaces--usage_limits"></a>
+### Nested Schema for `workspaces.usage_limits`
+
+Read-Only:
+
+- `alert_threshold` (Number) Alert threshold percentage.
+- `credit_limit` (Number) The credit limit value.
+- `periodic_reset` (String) When to reset the usage.
+- `type` (String) Type of usage limit.

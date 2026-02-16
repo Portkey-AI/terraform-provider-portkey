@@ -35,10 +35,30 @@ Read-Only:
 - `metadata` (Map of String) Custom metadata attached to the API key.
 - `name` (String) Human-readable name for the API key.
 - `organisation_id` (String) Organisation ID this key belongs to.
+- `rate_limits` (Attributes List) Rate limits for this API key. (see [below for nested schema](#nestedatt--api_keys--rate_limits))
 - `scopes` (List of String) List of permission scopes for this API key.
 - `status` (String) Status of the API key (active, exhausted).
 - `sub_type` (String) Sub-type of API key: 'service' or 'user'.
 - `type` (String) Type of API key: 'organisation' or 'workspace'.
 - `updated_at` (String) Timestamp when the API key was last updated.
+- `usage_limits` (Attributes) Usage limits for this API key. (see [below for nested schema](#nestedatt--api_keys--usage_limits))
 - `user_id` (String) User ID for user-type keys.
 - `workspace_id` (String) Workspace ID for workspace-level keys.
+
+<a id="nestedatt--api_keys--rate_limits"></a>
+### Nested Schema for `api_keys.rate_limits`
+
+Read-Only:
+
+- `type` (String) Type of rate limit.
+- `unit` (String) Rate limit unit.
+- `value` (Number) The rate limit value.
+
+
+<a id="nestedatt--api_keys--usage_limits"></a>
+### Nested Schema for `api_keys.usage_limits`
+
+Read-Only:
+
+- `credits_limit` (Number) The credit limit value.
+- `credits_limit_type` (String) Period for the credit limit.

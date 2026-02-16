@@ -23,9 +23,34 @@ Manages a Portkey workspace. Workspaces are sub-organizational units that enable
 
 - `description` (String) Description of the workspace.
 - `metadata` (Map of String) Custom metadata to attach to the workspace. This metadata can be used for tracking, observability, and identifying workspaces. All API keys created in this workspace will inherit this metadata by default.
+- `rate_limits` (Attributes List) Rate limits for this workspace. (see [below for nested schema](#nestedatt--rate_limits))
+- `usage_limits` (Attributes List) Usage limits for this workspace. (see [below for nested schema](#nestedatt--usage_limits))
 
 ### Read-Only
 
 - `created_at` (String) Timestamp when the workspace was created.
 - `id` (String) Workspace identifier.
 - `updated_at` (String) Timestamp when the workspace was last updated.
+
+<a id="nestedatt--rate_limits"></a>
+### Nested Schema for `rate_limits`
+
+Required:
+
+- `type` (String) Type of rate limit: 'requests' or 'tokens'.
+- `unit` (String) Rate limit unit: 'rpm' (per minute), 'rph' (per hour), or 'rpd' (per day).
+- `value` (Number) The rate limit value.
+
+
+<a id="nestedatt--usage_limits"></a>
+### Nested Schema for `usage_limits`
+
+Required:
+
+- `type` (String) Type of usage limit: 'cost' or 'tokens'.
+
+Optional:
+
+- `alert_threshold` (Number) Alert threshold percentage (0-100).
+- `credit_limit` (Number) The credit limit value.
+- `periodic_reset` (String) When to reset the usage: 'monthly' or 'weekly'.

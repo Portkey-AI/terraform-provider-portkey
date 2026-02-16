@@ -32,8 +32,10 @@ API Key Types:
 
 - `alert_emails` (List of String) List of email addresses to receive alerts related to this API key's usage.
 - `description` (String) Optional description of the API key.
-- `metadata` (Map of String) Custom metadata to attach to the API key. This metadata will be included with every request made using this key. Useful for tracking, observability, and identifying services. Example: `{"_user": "service-name", "service_uuid": "abc123"}`
+- `metadata` (Map of String) Custom metadata to attach to the API key. This metadata will be included with every request made using this key. Useful for tracking, observability, and identifying services. Example: {"_user": "service-name", "service_uuid": "abc123"}
+- `rate_limits` (Attributes List) Rate limits for this API key. (see [below for nested schema](#nestedatt--rate_limits))
 - `scopes` (List of String) List of permission scopes for this API key.
+- `usage_limits` (Attributes) Usage limits for this API key. (see [below for nested schema](#nestedatt--usage_limits))
 - `user_id` (String) User ID for user-type keys. Required when sub_type is 'user'.
 - `workspace_id` (String) Workspace ID. Required for workspace API keys (type='workspace'). Not used for Admin API keys.
 
@@ -45,3 +47,21 @@ API Key Types:
 - `organisation_id` (String) Organisation ID this key belongs to.
 - `status` (String) Status of the API key (active, exhausted).
 - `updated_at` (String) Timestamp when the API key was last updated.
+
+<a id="nestedatt--rate_limits"></a>
+### Nested Schema for `rate_limits`
+
+Required:
+
+- `type` (String) Type of rate limit: 'requests' or 'tokens'.
+- `unit` (String) Rate limit unit: 'rpm' (per minute), 'rph' (per hour), or 'rpd' (per day).
+- `value` (Number) The rate limit value.
+
+
+<a id="nestedatt--usage_limits"></a>
+### Nested Schema for `usage_limits`
+
+Optional:
+
+- `credits_limit` (Number) The credit limit value (e.g. 500.0 for $500).
+- `credits_limit_type` (String) Period for the credit limit: 'per_day', 'monthly', or 'total'.

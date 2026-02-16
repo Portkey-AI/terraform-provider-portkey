@@ -10,7 +10,8 @@
 | AI Gateway | 5 | 10 | ✅ All passing |
 | Governance | 3 | 6 | ✅ All passing |
 | Access Control | 1 | 2 | ✅ All passing |
-| **Total** | **12** | **22** | **41/48 passing** |
+| MCP Gateway | 6 | 4 | 🟡 New - needs API testing |
+| **Total** | **18** | **26** | **41/48 passing** |
 
 ## Provider Resources
 
@@ -28,6 +29,12 @@
 | `portkey_guardrail` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_usage_limits_policy` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_rate_limits_policy` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
+| `portkey_mcp_integration` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD | 🟡 New |
+| `portkey_mcp_server` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD | 🟡 New |
+| `portkey_mcp_integration_workspace_access` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT wrapping | 🟡 New |
+| `portkey_mcp_server_user_access` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT wrapping | 🟡 New |
+| `portkey_mcp_integration_capabilities` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT | 🟡 New |
+| `portkey_mcp_server_capabilities` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT | 🟡 New |
 
 ## Data Sources
 
@@ -55,6 +62,10 @@
 | `portkey_usage_limits_policies` | - | ✅ | Working | ✅ Passing |
 | `portkey_rate_limits_policy` | ✅ | - | Working | ✅ Passing |
 | `portkey_rate_limits_policies` | - | ✅ | Working | ✅ Passing |
+| `portkey_mcp_integration` | ✅ | - | Working | 🟡 New |
+| `portkey_mcp_integrations` | - | ✅ | Working | 🟡 New |
+| `portkey_mcp_server` | ✅ | - | Working | 🟡 New |
+| `portkey_mcp_servers` | - | ✅ | Working | 🟡 New |
 
 ## Not Implemented (API Available)
 
@@ -261,6 +272,50 @@ DELETE /configs/{slug}             → Delete
 }
 ```
 *Note: Config field is returned as a JSON string by the API, handled automatically*
+
+### MCP Integrations
+```
+POST   /mcp-integrations                          → Create
+GET    /mcp-integrations                          → List (optional ?workspace_id=xxx)
+GET    /mcp-integrations/{id}                     → Read
+PUT    /mcp-integrations/{id}                     → Update
+DELETE /mcp-integrations/{id}                     → Delete
+GET    /mcp-integrations/{id}/capabilities        → List capabilities
+PUT    /mcp-integrations/{id}/capabilities        → Update capabilities (bulk)
+GET    /mcp-integrations/{id}/workspaces          → List workspace access
+PUT    /mcp-integrations/{id}/workspaces          → Update workspace access (bulk)
+```
+
+**MCP Integration Fields:**
+- `name`: Display name
+- `url`: MCP server URL
+- `auth_type`: `none`, `api_key`, `bearer`, `oauth2`
+- `transport`: `sse`, `streamable_http`
+- `configurations`: JSON auth config (sensitive)
+- `workspace_id`: Optional workspace scope
+
+### MCP Servers
+```
+POST   /mcp-servers                               → Create
+GET    /mcp-servers                               → List (optional ?workspace_id=xxx)
+GET    /mcp-servers/{id}                          → Read
+PUT    /mcp-servers/{id}                          → Update
+DELETE /mcp-servers/{id}                          → Delete
+GET    /mcp-servers/{id}/capabilities             → List capabilities
+PUT    /mcp-servers/{id}/capabilities             → Update capabilities (bulk)
+GET    /mcp-servers/{id}/user-access              → List user access
+PUT    /mcp-servers/{id}/user-access              → Update user access (bulk)
+```
+
+**MCP Server Fields:**
+- `name`: Display name
+- `mcp_integration_id`: Reference to parent MCP integration
+- `workspace_id`: Workspace where server is provisioned
+
+**Sub-resource Patterns:**
+- Capabilities and access control use bulk PUT endpoints
+- Single-item operations wrap a single item in the bulk request array
+- Delete operations set `enabled=false` (no real DELETE endpoint)
 
 ## Known Issues
 

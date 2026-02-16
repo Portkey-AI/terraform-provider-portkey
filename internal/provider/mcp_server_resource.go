@@ -92,6 +92,7 @@ MCP servers provision an MCP integration to a specific workspace, making the MCP
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"status": schema.StringAttribute{
@@ -293,5 +294,7 @@ func mapMcpServerToState(server *client.McpServer, state *mcpServerResourceModel
 
 	if server.CreatedAt != "" {
 		state.CreatedAt = types.StringValue(server.CreatedAt)
+	} else {
+		state.CreatedAt = types.StringNull()
 	}
 }

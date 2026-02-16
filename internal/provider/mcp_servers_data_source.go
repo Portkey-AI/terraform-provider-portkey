@@ -125,6 +125,7 @@ func (d *mcpServersDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
+	state.Servers = make([]mcpServerListModel, 0, len(servers))
 	for _, s := range servers {
 		state.Servers = append(state.Servers, mcpServerListModel{
 			ID:               types.StringValue(s.ID),

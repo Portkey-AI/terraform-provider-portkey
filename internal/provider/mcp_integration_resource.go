@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -199,7 +200,15 @@ func (r *mcpIntegrationResource) Create(ctx context.Context, req resource.Create
 		createReq.WorkspaceID = plan.WorkspaceID.ValueString()
 	}
 	if !plan.Configurations.IsNull() && !plan.Configurations.IsUnknown() {
-		createReq.Configurations = plan.Configurations.ValueString()
+		var configurations map[string]interface{}
+		if err := json.Unmarshal([]byte(plan.Configurations.ValueString()), &configurations); err != nil {
+			resp.Diagnostics.AddError(
+				"Invalid configurations JSON",
+				"Could not parse configurations: "+err.Error(),
+			)
+			return
+		}
+		createReq.Configurations = configurations
 	}
 
 	createResp, err := r.client.CreateMcpIntegration(ctx, createReq)
@@ -283,7 +292,15 @@ func (r *mcpIntegrationResource) Update(ctx context.Context, req resource.Update
 		updateReq.Description = plan.Description.ValueString()
 	}
 	if !plan.Configurations.IsNull() && !plan.Configurations.IsUnknown() {
-		updateReq.Configurations = plan.Configurations.ValueString()
+		var configurations map[string]interface{}
+		if err := json.Unmarshal([]byte(plan.Configurations.ValueString()), &configurations); err != nil {
+			resp.Diagnostics.AddError(
+				"Invalid configurations JSON",
+				"Could not parse configurations: "+err.Error(),
+			)
+			return
+		}
+		updateReq.Configurations = configurations
 	}
 
 	integration, err := r.client.UpdateMcpIntegration(ctx, plan.ID.ValueString(), updateReq)
@@ -376,9 +393,13 @@ func mapMcpIntegrationToState(integration *client.McpIntegration, state *mcpInte
 
 	if integration.CreatedAt != "" {
 		state.CreatedAt = types.StringValue(integration.CreatedAt)
+	} else {
+		state.CreatedAt = types.StringNull()
 	}
 
 	if integration.LastUpdatedAt != "" {
 		state.LastUpdatedAt = types.StringValue(integration.LastUpdatedAt)
+	} else {
+		state.LastUpdatedAt = types.StringNull()
 	}
 }

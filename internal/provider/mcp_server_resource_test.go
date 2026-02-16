@@ -31,7 +31,7 @@ func TestAccMcpServerResource_basic(t *testing.T) {
 				ResourceName:            "portkey_mcp_server.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"created_at"},
+				ImportStateVerifyIgnore: []string{},
 			},
 			// Update testing - change name
 			{

@@ -2063,16 +2063,9 @@ type McpCapability struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// McpCapabilityUpdate represents an update to a capability
-type McpCapabilityUpdate struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Enabled bool   `json:"enabled"`
-}
-
 // McpCapabilitiesUpdateRequest represents the request to update capabilities
 type McpCapabilitiesUpdateRequest struct {
-	Capabilities []McpCapabilityUpdate `json:"capabilities"`
+	Capabilities []McpCapability `json:"capabilities"`
 }
 
 // GetMcpIntegrationCapabilities retrieves capabilities for an MCP integration
@@ -2094,7 +2087,7 @@ func (c *Client) GetMcpIntegrationCapabilities(ctx context.Context, id string) (
 }
 
 // UpdateMcpIntegrationCapabilities updates capabilities for an MCP integration
-func (c *Client) UpdateMcpIntegrationCapabilities(ctx context.Context, id string, capabilities []McpCapabilityUpdate) error {
+func (c *Client) UpdateMcpIntegrationCapabilities(ctx context.Context, id string, capabilities []McpCapability) error {
 	path := fmt.Sprintf("/mcp-integrations/%s/capabilities", id)
 	req := McpCapabilitiesUpdateRequest{Capabilities: capabilities}
 	_, err := c.doRequest(ctx, http.MethodPut, path, req)
@@ -2120,7 +2113,7 @@ func (c *Client) GetMcpServerCapabilities(ctx context.Context, id string) ([]Mcp
 }
 
 // UpdateMcpServerCapabilities updates capabilities for an MCP server
-func (c *Client) UpdateMcpServerCapabilities(ctx context.Context, id string, capabilities []McpCapabilityUpdate) error {
+func (c *Client) UpdateMcpServerCapabilities(ctx context.Context, id string, capabilities []McpCapability) error {
 	path := fmt.Sprintf("/mcp-servers/%s/capabilities", id)
 	req := McpCapabilitiesUpdateRequest{Capabilities: capabilities}
 	_, err := c.doRequest(ctx, http.MethodPut, path, req)

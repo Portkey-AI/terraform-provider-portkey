@@ -32,7 +32,7 @@ func TestAccMcpIntegrationResource_basic(t *testing.T) {
 				ResourceName:            "portkey_mcp_integration.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"configurations", "created_at", "last_updated_at"},
+				ImportStateVerifyIgnore: []string{"configurations"},
 			},
 			// Update testing - change name and description
 			{

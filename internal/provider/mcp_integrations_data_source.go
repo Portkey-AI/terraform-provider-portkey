@@ -131,6 +131,7 @@ func (d *mcpIntegrationsDataSource) Read(ctx context.Context, req datasource.Rea
 		return
 	}
 
+	state.Integrations = make([]mcpIntegrationListModel, 0, len(integrations))
 	for _, i := range integrations {
 		state.Integrations = append(state.Integrations, mcpIntegrationListModel{
 			ID:            types.StringValue(i.ID),

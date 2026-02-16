@@ -7,7 +7,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -19,9 +18,8 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &mcpServerCapabilitiesResource{}
-	_ resource.ResourceWithConfigure   = &mcpServerCapabilitiesResource{}
-	_ resource.ResourceWithImportState = &mcpServerCapabilitiesResource{}
+	_ resource.Resource              = &mcpServerCapabilitiesResource{}
+	_ resource.ResourceWithConfigure = &mcpServerCapabilitiesResource{}
 )
 
 // NewMcpServerCapabilitiesResource is a helper function to simplify the provider implementation.
@@ -207,9 +205,9 @@ func (r *mcpServerCapabilitiesResource) Delete(ctx context.Context, req resource
 	}
 
 	// Reset all managed capabilities to enabled (default state)
-	var resets []client.McpCapabilityUpdate
+	var resets []client.McpCapability
 	for _, cap := range state.Capabilities {
-		resets = append(resets, client.McpCapabilityUpdate{
+		resets = append(resets, client.McpCapability{
 			Name:    cap.Name.ValueString(),
 			Type:    cap.Type.ValueString(),
 			Enabled: true,
@@ -229,12 +227,6 @@ func (r *mcpServerCapabilitiesResource) Delete(ctx context.Context, req resource
 			return
 		}
 	}
-}
-
-// ImportState imports the resource state.
-func (r *mcpServerCapabilitiesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("mcp_server_id"), req.ID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 
 // readCapabilities reads capabilities from the API and filters to only those managed in state.

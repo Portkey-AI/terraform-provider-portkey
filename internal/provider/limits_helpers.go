@@ -384,4 +384,3 @@ func buildIntegrationWorkspaceLimitsFromPlan(ctx context.Context, plan *integrat
 
 	return usageLimits, rateLimits, diags
 }
-

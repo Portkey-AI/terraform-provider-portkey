@@ -233,7 +233,7 @@ func (r *mcpServerCapabilitiesResource) Delete(ctx context.Context, req resource
 
 // ImportState imports the resource state.
 func (r *mcpServerCapabilitiesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("mcp_server_id"), req, resp)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("mcp_server_id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 

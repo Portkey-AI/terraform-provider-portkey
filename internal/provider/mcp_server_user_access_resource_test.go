@@ -2,26 +2,18 @@ package provider
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-func getTestUserID() string {
-	if v := os.Getenv("TEST_USER_ID"); v != "" {
-		return v
-	}
-	return "test-user-id"
-}
-
 func TestAccMcpServerUserAccessResource_basic(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-test")
 	workspaceID := getTestWorkspaceID()
 	userID := getTestUserID()
 
-	if userID == "test-user-id" {
+	if userID == "" {
 		t.Skip("TEST_USER_ID must be set for this acceptance test")
 	}
 

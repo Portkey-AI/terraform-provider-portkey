@@ -36,8 +36,8 @@ type mcpIntegrationCapabilitiesResource struct {
 
 // mcpIntegrationCapabilitiesResourceModel maps the resource schema data.
 type mcpIntegrationCapabilitiesResourceModel struct {
-	ID               types.String      `tfsdk:"id"`
-	McpIntegrationID types.String      `tfsdk:"mcp_integration_id"`
+	ID               types.String         `tfsdk:"id"`
+	McpIntegrationID types.String         `tfsdk:"mcp_integration_id"`
 	Capabilities     []mcpCapabilityModel `tfsdk:"capabilities"`
 }
 
@@ -241,7 +241,7 @@ func (r *mcpIntegrationCapabilitiesResource) Delete(ctx context.Context, req res
 
 // ImportState imports the resource state.
 func (r *mcpIntegrationCapabilitiesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("mcp_integration_id"), req, resp)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("mcp_integration_id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 

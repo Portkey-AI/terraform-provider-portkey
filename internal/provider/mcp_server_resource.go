@@ -68,6 +68,7 @@ MCP servers provision an MCP integration to a specific workspace, making the MCP
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{

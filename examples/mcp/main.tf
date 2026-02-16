@@ -60,17 +60,18 @@ resource "portkey_mcp_server" "github_dev" {
 resource "portkey_mcp_integration_capabilities" "github" {
   mcp_integration_id = portkey_mcp_integration.github.id
 
-  capabilities {
-    name    = "create_pull_request"
-    type    = "tool"
-    enabled = true
-  }
-
-  capabilities {
-    name    = "delete_repository"
-    type    = "tool"
-    enabled = false # Disable dangerous tool at org level
-  }
+  capabilities = [
+    {
+      name    = "create_pull_request"
+      type    = "tool"
+      enabled = true
+    },
+    {
+      name    = "delete_repository"
+      type    = "tool"
+      enabled = false # Disable dangerous tool at org level
+    },
+  ]
 }
 
 # ============================================================================
@@ -80,11 +81,13 @@ resource "portkey_mcp_integration_capabilities" "github" {
 resource "portkey_mcp_server_capabilities" "github_dev" {
   mcp_server_id = portkey_mcp_server.github_dev.id
 
-  capabilities {
-    name    = "create_pull_request"
-    type    = "tool"
-    enabled = true
-  }
+  capabilities = [
+    {
+      name    = "create_pull_request"
+      type    = "tool"
+      enabled = true
+    },
+  ]
 }
 
 # ============================================================================

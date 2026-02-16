@@ -100,6 +100,14 @@ func getTestVirtualKey() string {
 	return ""
 }
 
+// getTestUserID returns a user ID for testing
+func getTestUserID() string {
+	if v := os.Getenv("TEST_USER_ID"); v != "" {
+		return v
+	}
+	return ""
+}
+
 // providerConfig is a shared configuration for all acceptance tests.
 const providerConfig = `
 provider "portkey" {}
@@ -125,6 +133,12 @@ func TestProvider_HasChildResources(t *testing.T) {
 		"portkey_guardrail",
 		"portkey_usage_limits_policy",
 		"portkey_rate_limits_policy",
+		"portkey_mcp_integration",
+		"portkey_mcp_server",
+		"portkey_mcp_integration_workspace_access",
+		"portkey_mcp_server_user_access",
+		"portkey_mcp_integration_capabilities",
+		"portkey_mcp_server_capabilities",
 	}
 
 	resources := New("test")().Resources(context.Background())
@@ -161,6 +175,10 @@ func TestProvider_HasChildDataSources(t *testing.T) {
 		"portkey_usage_limits_policies",
 		"portkey_rate_limits_policy",
 		"portkey_rate_limits_policies",
+		"portkey_mcp_integration",
+		"portkey_mcp_integrations",
+		"portkey_mcp_server",
+		"portkey_mcp_servers",
 	}
 
 	dataSources := New("test")().DataSources(context.Background())

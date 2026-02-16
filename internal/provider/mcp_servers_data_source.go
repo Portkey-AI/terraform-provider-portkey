@@ -28,8 +28,8 @@ type mcpServersDataSource struct {
 
 // mcpServersDataSourceModel maps the data source schema data.
 type mcpServersDataSourceModel struct {
-	ID          types.String       `tfsdk:"id"`
-	WorkspaceID types.String       `tfsdk:"workspace_id"`
+	ID          types.String         `tfsdk:"id"`
+	WorkspaceID types.String         `tfsdk:"workspace_id"`
 	Servers     []mcpServerListModel `tfsdk:"servers"`
 }
 

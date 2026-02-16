@@ -45,6 +45,8 @@ type apiKeyDataItemModel struct {
 	UserID         types.String `tfsdk:"user_id"`
 	Status         types.String `tfsdk:"status"`
 	Scopes         types.List   `tfsdk:"scopes"`
+	RateLimits     types.List   `tfsdk:"rate_limits"`
+	UsageLimits    types.Object `tfsdk:"usage_limits"`
 	Metadata       types.Map    `tfsdk:"metadata"`
 	AlertEmails    types.List   `tfsdk:"alert_emails"`
 	CreatedAt      types.String `tfsdk:"created_at"`
@@ -110,6 +112,40 @@ func (d *apiKeysDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 							Description: "List of permission scopes for this API key.",
 							Computed:    true,
 							ElementType: types.StringType,
+						},
+						"usage_limits": schema.SingleNestedAttribute{
+							Description: "Usage limits for this API key.",
+							Computed:    true,
+							Attributes: map[string]schema.Attribute{
+								"credits_limit": schema.Float64Attribute{
+									Description: "The credit limit value.",
+									Computed:    true,
+								},
+								"credits_limit_type": schema.StringAttribute{
+									Description: "Period for the credit limit.",
+									Computed:    true,
+								},
+							},
+						},
+						"rate_limits": schema.ListNestedAttribute{
+							Description: "Rate limits for this API key.",
+							Computed:    true,
+							NestedObject: schema.NestedAttributeObject{
+								Attributes: map[string]schema.Attribute{
+									"type": schema.StringAttribute{
+										Description: "Type of rate limit.",
+										Computed:    true,
+									},
+									"unit": schema.StringAttribute{
+										Description: "Rate limit unit.",
+										Computed:    true,
+									},
+									"value": schema.Int64Attribute{
+										Description: "The rate limit value.",
+										Computed:    true,
+									},
+								},
+							},
 						},
 						"metadata": schema.MapAttribute{
 							Description: "Custom metadata attached to the API key.",
@@ -228,6 +264,20 @@ func (d *apiKeysDataSource) Read(ctx context.Context, req datasource.ReadRequest
 			alertEmailsList = types.ListNull(types.StringType)
 		}
 
+		// Handle usage_limits
+		ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+		resp.Diagnostics.Append(ulDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		// Handle rate_limits
+		rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+		resp.Diagnostics.Append(rlDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
 		keyItem := apiKeyDataItemModel{
 			ID:             types.StringValue(apiKey.ID),
 			Name:           types.StringValue(apiKey.Name),
@@ -236,6 +286,8 @@ func (d *apiKeysDataSource) Read(ctx context.Context, req datasource.ReadRequest
 			OrganisationID: types.StringValue(apiKey.OrganisationID),
 			Status:         types.StringValue(apiKey.Status),
 			Scopes:         scopesList,
+			RateLimits:     rlList,
+			UsageLimits:    ulObj,
 			Metadata:       metadataMap,
 			AlertEmails:    alertEmailsList,
 			CreatedAt:      types.StringValue(apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00")),

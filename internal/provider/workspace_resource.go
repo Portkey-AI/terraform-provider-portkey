@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
@@ -35,6 +38,8 @@ type workspaceResourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
+	UsageLimits types.List   `tfsdk:"usage_limits"`
+	RateLimits  types.List   `tfsdk:"rate_limits"`
 	Metadata    types.Map    `tfsdk:"metadata"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 	UpdatedAt   types.String `tfsdk:"updated_at"`
@@ -64,6 +69,67 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"description": schema.StringAttribute{
 				Description: "Description of the workspace.",
 				Optional:    true,
+			},
+			"usage_limits": schema.ListNestedAttribute{
+				Description: "Usage limits for this workspace.",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of usage limit: 'cost' or 'tokens'.",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("cost", "tokens"),
+							},
+						},
+						"credit_limit": schema.Int64Attribute{
+							Description: "The credit limit value.",
+							Optional:    true,
+						},
+						"alert_threshold": schema.Int64Attribute{
+							Description: "Alert threshold percentage (0-100).",
+							Optional:    true,
+							Validators: []validator.Int64{
+								int64validator.Between(0, 100),
+							},
+						},
+						"periodic_reset": schema.StringAttribute{
+							Description: "When to reset the usage: 'monthly' or 'weekly'.",
+							Optional:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("monthly", "weekly"),
+							},
+						},
+					},
+				},
+			},
+			"rate_limits": schema.ListNestedAttribute{
+				Description: "Rate limits for this workspace.",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of rate limit: 'requests' or 'tokens'.",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("requests", "tokens"),
+							},
+						},
+						"unit": schema.StringAttribute{
+							Description: "Rate limit unit: 'rpm' (per minute), 'rph' (per hour), or 'rpd' (per day).",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("rpm", "rph", "rpd"),
+							},
+						},
+						"value": schema.Int64Attribute{
+							Description: "The rate limit value.",
+							Required:    true,
+						},
+					},
+				},
 			},
 			"metadata": schema.MapAttribute{
 				Description: "Custom metadata to attach to the workspace. This metadata can be used for tracking, observability, and identifying workspaces. All API keys created in this workspace will inherit this metadata by default.",
@@ -124,6 +190,52 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		Description: plan.Description.ValueString(),
 	}
 
+	// Handle usage_limits
+	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
+		var usageLimits []workspaceUsageLimitsModel
+		diags = plan.UsageLimits.ElementsAs(ctx, &usageLimits, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for _, ul := range usageLimits {
+			clientUL := client.IntegrationWorkspaceUsageLimits{
+				Type:          ul.Type.ValueString(),
+				PeriodicReset: ul.PeriodicReset.ValueString(),
+			}
+			if !ul.CreditLimit.IsNull() {
+				v := int(ul.CreditLimit.ValueInt64())
+				clientUL.CreditLimit = &v
+			}
+			if !ul.AlertThreshold.IsNull() {
+				v := int(ul.AlertThreshold.ValueInt64())
+				clientUL.AlertThreshold = &v
+			}
+			createReq.UsageLimits = append(createReq.UsageLimits, clientUL)
+		}
+	}
+
+	// Handle rate_limits
+	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
+		var rateLimits []workspaceRateLimitsModel
+		diags = plan.RateLimits.ElementsAs(ctx, &rateLimits, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for _, rl := range rateLimits {
+			clientRL := client.IntegrationWorkspaceRateLimits{
+				Type: rl.Type.ValueString(),
+				Unit: rl.Unit.ValueString(),
+			}
+			if !rl.Value.IsNull() {
+				v := int(rl.Value.ValueInt64())
+				clientRL.Value = &v
+			}
+			createReq.RateLimits = append(createReq.RateLimits, clientRL)
+		}
+	}
+
 	// Handle metadata
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
 		var metadata map[string]string
@@ -150,6 +262,22 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 	plan.ID = types.StringValue(workspace.ID)
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+
+	// Handle usage_limits from API
+	ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.UsageLimits = ulList
+
+	// Handle rate_limits from API
+	rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.RateLimits = rlList
 
 	// Handle metadata from API response
 	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
@@ -201,6 +329,22 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 	}
 	// Keep state.Description as-is if it was null and API returns empty
 
+	// Handle usage_limits from API
+	ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.UsageLimits = ulList
+
+	// Handle rate_limits from API
+	rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.RateLimits = rlList
+
 	// Handle metadata from API
 	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, workspace.Defaults.Metadata)
@@ -238,6 +382,52 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	updateReq := client.UpdateWorkspaceRequest{
 		Name:        plan.Name.ValueString(),
 		Description: plan.Description.ValueString(),
+	}
+
+	// Handle usage_limits
+	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
+		var usageLimits []workspaceUsageLimitsModel
+		diags = plan.UsageLimits.ElementsAs(ctx, &usageLimits, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for _, ul := range usageLimits {
+			clientUL := client.IntegrationWorkspaceUsageLimits{
+				Type:          ul.Type.ValueString(),
+				PeriodicReset: ul.PeriodicReset.ValueString(),
+			}
+			if !ul.CreditLimit.IsNull() {
+				v := int(ul.CreditLimit.ValueInt64())
+				clientUL.CreditLimit = &v
+			}
+			if !ul.AlertThreshold.IsNull() {
+				v := int(ul.AlertThreshold.ValueInt64())
+				clientUL.AlertThreshold = &v
+			}
+			updateReq.UsageLimits = append(updateReq.UsageLimits, clientUL)
+		}
+	}
+
+	// Handle rate_limits
+	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
+		var rateLimits []workspaceRateLimitsModel
+		diags = plan.RateLimits.ElementsAs(ctx, &rateLimits, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for _, rl := range rateLimits {
+			clientRL := client.IntegrationWorkspaceRateLimits{
+				Type: rl.Type.ValueString(),
+				Unit: rl.Unit.ValueString(),
+			}
+			if !rl.Value.IsNull() {
+				v := int(rl.Value.ValueInt64())
+				clientRL.Value = &v
+			}
+			updateReq.RateLimits = append(updateReq.RateLimits, clientRL)
+		}
 	}
 
 	// Handle metadata

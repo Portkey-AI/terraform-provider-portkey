@@ -7,7 +7,6 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -27,24 +26,6 @@ var (
 	_ resource.ResourceWithImportState = &integrationWorkspaceAccessResource{}
 )
 
-// Type definitions for nested attributes
-var (
-	usageLimitsAttrTypes = map[string]attr.Type{
-		"type":            types.StringType,
-		"credit_limit":    types.Int64Type,
-		"alert_threshold": types.Int64Type,
-		"periodic_reset":  types.StringType,
-	}
-
-	rateLimitsAttrTypes = map[string]attr.Type{
-		"type":  types.StringType,
-		"unit":  types.StringType,
-		"value": types.Int64Type,
-	}
-
-	usageLimitsObjectType = types.ObjectType{AttrTypes: usageLimitsAttrTypes}
-	rateLimitsObjectType  = types.ObjectType{AttrTypes: rateLimitsAttrTypes}
-)
 
 // NewIntegrationWorkspaceAccessResource is a helper function to simplify the provider implementation.
 func NewIntegrationWorkspaceAccessResource() resource.Resource {
@@ -66,20 +47,7 @@ type integrationWorkspaceAccessResourceModel struct {
 	RateLimits    types.List   `tfsdk:"rate_limits"`
 }
 
-// usageLimitsModel maps the usage_limits block
-type integrationWorkspaceUsageLimitsModel struct {
-	Type           types.String `tfsdk:"type"`
-	CreditLimit    types.Int64  `tfsdk:"credit_limit"`
-	AlertThreshold types.Int64  `tfsdk:"alert_threshold"`
-	PeriodicReset  types.String `tfsdk:"periodic_reset"`
-}
-
-// rateLimitsModel maps the rate_limits block
-type integrationWorkspaceRateLimitsModel struct {
-	Type  types.String `tfsdk:"type"`
-	Unit  types.String `tfsdk:"unit"`
-	Value types.Int64  `tfsdk:"value"`
-}
+// Model types are defined in limits_helpers.go as workspaceUsageLimitsModel and workspaceRateLimitsModel
 
 // Metadata returns the resource type name.
 func (r *integrationWorkspaceAccessResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -245,12 +213,12 @@ func (r *integrationWorkspaceAccessResource) Create(ctx context.Context, req res
 
 	// Update plan with actual values from API
 	plan.Enabled = types.BoolValue(workspace.Enabled)
-	plan.UsageLimits, diags = usageLimitsToTerraformList(workspace.UsageLimits)
+	plan.UsageLimits, diags = workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	plan.RateLimits, diags = rateLimitsToTerraformList(workspace.RateLimits)
+	plan.RateLimits, diags = workspaceRateLimitsToTerraformList(workspace.RateLimits)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -290,14 +258,14 @@ func (r *integrationWorkspaceAccessResource) Read(ctx context.Context, req resou
 	state.Enabled = types.BoolValue(workspace.Enabled)
 
 	// Map usage limits
-	state.UsageLimits, diags = usageLimitsToTerraformList(workspace.UsageLimits)
+	state.UsageLimits, diags = workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	// Map rate limits
-	state.RateLimits, diags = rateLimitsToTerraformList(workspace.RateLimits)
+	state.RateLimits, diags = workspaceRateLimitsToTerraformList(workspace.RateLimits)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -347,12 +315,12 @@ func (r *integrationWorkspaceAccessResource) Update(ctx context.Context, req res
 
 	// Update plan with actual values from API
 	plan.Enabled = types.BoolValue(workspace.Enabled)
-	plan.UsageLimits, diags = usageLimitsToTerraformList(workspace.UsageLimits)
+	plan.UsageLimits, diags = workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	plan.RateLimits, diags = rateLimitsToTerraformList(workspace.RateLimits)
+	plan.RateLimits, diags = workspaceRateLimitsToTerraformList(workspace.RateLimits)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -436,7 +404,7 @@ func buildWorkspaceUpdateRequest(ctx context.Context, plan *integrationWorkspace
 
 	// Parse usage limits
 	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
-		var usageLimits []integrationWorkspaceUsageLimitsModel
+		var usageLimits []workspaceUsageLimitsModel
 		diags.Append(plan.UsageLimits.ElementsAs(ctx, &usageLimits, false)...)
 		if diags.HasError() {
 			return workspaceReq, diags
@@ -461,7 +429,7 @@ func buildWorkspaceUpdateRequest(ctx context.Context, plan *integrationWorkspace
 
 	// Parse rate limits
 	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
-		var rateLimits []integrationWorkspaceRateLimitsModel
+		var rateLimits []workspaceRateLimitsModel
 		diags.Append(plan.RateLimits.ElementsAs(ctx, &rateLimits, false)...)
 		if diags.HasError() {
 			return workspaceReq, diags
@@ -483,72 +451,5 @@ func buildWorkspaceUpdateRequest(ctx context.Context, plan *integrationWorkspace
 	return workspaceReq, diags
 }
 
-// usageLimitsToTerraformList converts client usage limits to a Terraform list
-func usageLimitsToTerraformList(limits []client.IntegrationWorkspaceUsageLimits) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	if len(limits) == 0 {
-		// Return empty list instead of null to avoid perpetual diffs
-		return types.ListValueMust(usageLimitsObjectType, []attr.Value{}), diags
-	}
-
-	usageLimitsAttrs := make([]attr.Value, 0, len(limits))
-	for _, ul := range limits {
-		attrs := map[string]attr.Value{
-			"type":            types.StringValue(ul.Type),
-			"periodic_reset":  types.StringValue(ul.PeriodicReset),
-			"credit_limit":    types.Int64Null(),
-			"alert_threshold": types.Int64Null(),
-		}
-		if ul.CreditLimit != nil {
-			attrs["credit_limit"] = types.Int64Value(int64(*ul.CreditLimit))
-		}
-		if ul.AlertThreshold != nil {
-			attrs["alert_threshold"] = types.Int64Value(int64(*ul.AlertThreshold))
-		}
-
-		objVal, d := types.ObjectValue(usageLimitsAttrTypes, attrs)
-		diags.Append(d...)
-		if diags.HasError() {
-			return types.ListNull(usageLimitsObjectType), diags
-		}
-		usageLimitsAttrs = append(usageLimitsAttrs, objVal)
-	}
-
-	list, d := types.ListValue(usageLimitsObjectType, usageLimitsAttrs)
-	diags.Append(d...)
-	return list, diags
-}
-
-// rateLimitsToTerraformList converts client rate limits to a Terraform list
-func rateLimitsToTerraformList(limits []client.IntegrationWorkspaceRateLimits) (types.List, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	if len(limits) == 0 {
-		// Return empty list instead of null to avoid perpetual diffs
-		return types.ListValueMust(rateLimitsObjectType, []attr.Value{}), diags
-	}
-
-	rateLimitsAttrs := make([]attr.Value, 0, len(limits))
-	for _, rl := range limits {
-		attrs := map[string]attr.Value{
-			"type":  types.StringValue(rl.Type),
-			"unit":  types.StringValue(rl.Unit),
-			"value": types.Int64Null(),
-		}
-		if rl.Value != nil {
-			attrs["value"] = types.Int64Value(int64(*rl.Value))
-		}
-
-		objVal, d := types.ObjectValue(rateLimitsAttrTypes, attrs)
-		diags.Append(d...)
-		if diags.HasError() {
-			return types.ListNull(rateLimitsObjectType), diags
-		}
-		rateLimitsAttrs = append(rateLimitsAttrs, objVal)
-	}
-
-	list, d := types.ListValue(rateLimitsObjectType, rateLimitsAttrs)
-	diags.Append(d...)
-	return list, diags
-}
+// workspaceUsageLimitsToTerraformList and workspaceRateLimitsToTerraformList
+// are defined in limits_helpers.go

@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
@@ -44,6 +46,8 @@ type apiKeyResourceModel struct {
 	UserID         types.String `tfsdk:"user_id"`
 	Status         types.String `tfsdk:"status"`
 	Scopes         types.List   `tfsdk:"scopes"`
+	RateLimits     types.List   `tfsdk:"rate_limits"`
+	UsageLimits    types.Object `tfsdk:"usage_limits"`
 	Metadata       types.Map    `tfsdk:"metadata"`
 	AlertEmails    types.List   `tfsdk:"alert_emails"`
 	CreatedAt      types.String `tfsdk:"created_at"`
@@ -129,6 +133,51 @@ API Key Types:
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
+			},
+			"usage_limits": schema.SingleNestedAttribute{
+				Description: "Usage limits for this API key.",
+				Optional:    true,
+				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"credits_limit": schema.Float64Attribute{
+						Description: "The credit limit value (e.g. 500.0 for $500).",
+						Optional:    true,
+					},
+					"credits_limit_type": schema.StringAttribute{
+						Description: "Period for the credit limit: 'per_day', 'monthly', or 'total'.",
+						Optional:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("per_day", "monthly", "total"),
+						},
+					},
+				},
+			},
+			"rate_limits": schema.ListNestedAttribute{
+				Description: "Rate limits for this API key.",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of rate limit: 'requests' or 'tokens'.",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("requests", "tokens"),
+							},
+						},
+						"unit": schema.StringAttribute{
+							Description: "Rate limit unit: 'rpm' (per minute), 'rph' (per hour), or 'rpd' (per day).",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("rpm", "rph", "rpd"),
+							},
+						},
+						"value": schema.Int64Attribute{
+							Description: "The rate limit value.",
+							Required:    true,
+						},
+					},
+				},
 			},
 			"metadata": schema.MapAttribute{
 				Description: "Custom metadata to attach to the API key. This metadata will be included with every request made using this key. Useful for tracking, observability, and identifying services. Example: {\"_user\": \"service-name\", \"service_uuid\": \"abc123\"}",
@@ -244,6 +293,16 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		createReq.Defaults.Metadata = metadata
 	}
 
+	// Handle usage_limits
+	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
+		createReq.UsageLimits = terraformToAPIKeyUsageLimits(plan.UsageLimits)
+	}
+
+	// Handle rate_limits
+	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
+		createReq.RateLimits = terraformToAPIKeyRateLimits(plan.RateLimits)
+	}
+
 	// Handle alert_emails
 	if !plan.AlertEmails.IsNull() && !plan.AlertEmails.IsUnknown() {
 		var alertEmails []string
@@ -308,6 +367,22 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		}
 		plan.Scopes = scopesList
 	}
+
+	// Handle usage_limits from API
+	ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.UsageLimits = ulObj
+
+	// Handle rate_limits from API
+	rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.RateLimits = rlList
 
 	// Handle metadata from API
 	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
@@ -409,6 +484,22 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.Scopes = scopesList
 	}
 
+	// Handle usage_limits from API
+	ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.UsageLimits = ulObj
+
+	// Handle rate_limits from API
+	rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.RateLimits = rlList
+
 	// Handle metadata from API
 	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
@@ -498,6 +589,16 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.Defaults.Metadata = metadata
 	}
 
+	// Handle usage_limits
+	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
+		updateReq.UsageLimits = terraformToAPIKeyUsageLimits(plan.UsageLimits)
+	}
+
+	// Handle rate_limits
+	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
+		updateReq.RateLimits = terraformToAPIKeyRateLimits(plan.RateLimits)
+	}
+
 	// Handle alert_emails
 	if !plan.AlertEmails.IsNull() && !plan.AlertEmails.IsUnknown() {
 		var alertEmails []string
@@ -537,6 +638,22 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 		plan.Scopes = scopesList
 	}
+
+	// Handle usage_limits from API
+	ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.UsageLimits = ulObj
+
+	// Handle rate_limits from API
+	rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.RateLimits = rlList
 
 	// Handle metadata from API
 	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {

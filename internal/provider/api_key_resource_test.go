@@ -260,13 +260,100 @@ resource "portkey_api_key" "test" {
   type     = "organisation"
   sub_type = "service"
   scopes   = ["providers.list"]
-  
+
   metadata = {
     "_user"        = "full-test"
     "service_uuid" = "full123"
   }
-  
+
   alert_emails = ["test@example.com", "admin@example.com"]
+}
+`, name)
+}
+
+func TestAccAPIKeyResource_withUsageLimits(t *testing.T) {
+	rnd := rand.Int63() % 1000000
+	name := fmt.Sprintf("tf-acc-limits-%d", rnd)
+	nameUpdated := fmt.Sprintf("tf-acc-limits-%d-upd", rnd)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with usage_limits
+			{
+				Config: testAccAPIKeyResourceConfigWithUsageLimits(name, 500, "monthly"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", name),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit", "500"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit_type", "monthly"),
+				),
+			},
+			// Update usage_limits
+			{
+				Config: testAccAPIKeyResourceConfigWithUsageLimits(nameUpdated, 1000, "per_day"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", nameUpdated),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit", "1000"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit_type", "per_day"),
+				),
+			},
+			// Delete testing automatically occurs in TestCase
+		},
+	})
+}
+
+func TestAccAPIKeyResource_withRateLimits(t *testing.T) {
+	rnd := rand.Int63() % 1000000
+	name := fmt.Sprintf("tf-acc-rl-%d", rnd)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with rate_limits
+			{
+				Config: testAccAPIKeyResourceConfigWithRateLimits(name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", name),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rate_limits.#", "1"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rate_limits.0.type", "requests"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rate_limits.0.unit", "rpm"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rate_limits.0.value", "100"),
+				),
+			},
+			// Delete testing automatically occurs in TestCase
+		},
+	})
+}
+
+func testAccAPIKeyResourceConfigWithUsageLimits(name string, creditsLimit int, limitType string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  usage_limits = {
+    credits_limit      = %[2]d
+    credits_limit_type = %[3]q
+  }
+}
+`, name, creditsLimit, limitType)
+}
+
+func testAccAPIKeyResourceConfigWithRateLimits(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  rate_limits {
+    type  = "requests"
+    unit  = "rpm"
+    value = 100
+  }
 }
 `, name)
 }

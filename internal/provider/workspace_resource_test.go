@@ -204,11 +204,102 @@ provider "portkey" {}
 resource "portkey_workspace" "test" {
   name        = %[1]q
   description = "Workspace with updated metadata"
-  
+
   metadata = {
     "_user"       = "updated-workspace"
     "team"        = "platform"
     "environment" = "production"
+  }
+}
+`, name)
+}
+
+func TestAccWorkspaceResource_withUsageLimits(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-wslim")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with usage_limits
+			{
+				Config: testAccWorkspaceResourceConfigWithUsageLimits(rName, 500, 400),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_workspace.test", "id"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.#", "1"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.type", "cost"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.credit_limit", "500"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.alert_threshold", "400"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.periodic_reset", "monthly"),
+				),
+			},
+			// Update usage_limits
+			{
+				Config: testAccWorkspaceResourceConfigWithUsageLimits(rName+"-upd", 1000, 800),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_workspace.test", "name", rName+"-upd"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.credit_limit", "1000"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.alert_threshold", "800"),
+				),
+			},
+			// Delete testing automatically occurs in TestCase
+		},
+	})
+}
+
+func TestAccWorkspaceResource_withRateLimits(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-wsrl")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccWorkspaceResourceConfigWithRateLimits(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_workspace.test", "id"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "rate_limits.#", "1"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "rate_limits.0.type", "requests"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "rate_limits.0.unit", "rpm"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "rate_limits.0.value", "100"),
+				),
+			},
+		},
+	})
+}
+
+func testAccWorkspaceResourceConfigWithUsageLimits(name string, creditLimit, alertThreshold int) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_workspace" "test" {
+  name        = %[1]q
+  description = "Workspace with usage limits"
+
+  usage_limits {
+    type            = "cost"
+    credit_limit    = %[2]d
+    alert_threshold = %[3]d
+    periodic_reset  = "monthly"
+  }
+}
+`, name, creditLimit, alertThreshold)
+}
+
+func testAccWorkspaceResourceConfigWithRateLimits(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_workspace" "test" {
+  name        = %[1]q
+  description = "Workspace with rate limits"
+
+  rate_limits {
+    type  = "requests"
+    unit  = "rpm"
+    value = 100
   }
 }
 `, name)

@@ -31,39 +31,10 @@ func TestAccMcpE2E_integrationToWorkspaceAccess(t *testing.T) {
 					// Verify workspace access was created
 					resource.TestCheckResourceAttrSet("portkey_mcp_integration_workspace_access.test", "id"),
 					resource.TestCheckResourceAttr("portkey_mcp_integration_workspace_access.test", "enabled", "true"),
-				),
-			},
-		},
-	})
-}
-
-// TestAccMcpE2E_fullStack tests the complete MCP resource stack:
-// integration -> workspace -> workspace_access -> server -> data sources.
-// This exercises the full dependency chain in a single test.
-func TestAccMcpE2E_fullStack(t *testing.T) {
-	rName := acctest.RandomWithPrefix("tf-acc-mcp-full")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheck(t) },
-		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccMcpE2EFullStack(rName),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Integration
-					resource.TestCheckResourceAttrSet("portkey_mcp_integration.test", "id"),
-					// Workspace
-					resource.TestCheckResourceAttrSet("portkey_workspace.test", "id"),
-					// Workspace access
-					resource.TestCheckResourceAttr("portkey_mcp_integration_workspace_access.test", "enabled", "true"),
-					// Server
-					resource.TestCheckResourceAttrSet("portkey_mcp_server.test", "id"),
-					resource.TestCheckResourceAttr("portkey_mcp_server.test", "name", rName+"-server"),
-					// Data sources read back correctly
+					// Verify data source reads back correctly
 					resource.TestCheckResourceAttrSet("data.portkey_mcp_integration.test", "id"),
 					resource.TestCheckResourceAttr("data.portkey_mcp_integration.test", "name", rName+"-integration"),
-					resource.TestCheckResourceAttrSet("data.portkey_mcp_server.test", "id"),
-					resource.TestCheckResourceAttr("data.portkey_mcp_server.test", "name", rName+"-server"),
+					resource.TestCheckResourceAttr("data.portkey_mcp_integration.test", "auth_type", "oauth_auto"),
 				),
 			},
 		},
@@ -91,45 +62,9 @@ resource "portkey_mcp_integration_workspace_access" "test" {
   workspace_id       = portkey_workspace.test.id
   enabled            = true
 }
-`, name)
-}
-
-func testAccMcpE2EFullStack(name string) string {
-	return fmt.Sprintf(`
-provider "portkey" {}
-
-resource "portkey_mcp_integration" "test" {
-  name      = "%[1]s-integration"
-  url       = "https://example.com/mcp"
-  auth_type = "none"
-  transport = "sse"
-}
-
-resource "portkey_workspace" "test" {
-  name        = %[1]q
-  description = "Full stack E2E test workspace"
-}
-
-resource "portkey_mcp_integration_workspace_access" "test" {
-  mcp_integration_id = portkey_mcp_integration.test.id
-  workspace_id       = portkey_workspace.test.id
-  enabled            = true
-}
-
-resource "portkey_mcp_server" "test" {
-  name               = "%[1]s-server"
-  mcp_integration_id = portkey_mcp_integration.test.id
-  workspace_id       = portkey_workspace.test.id
-
-  depends_on = [portkey_mcp_integration_workspace_access.test]
-}
 
 data "portkey_mcp_integration" "test" {
   id = portkey_mcp_integration.test.id
-}
-
-data "portkey_mcp_server" "test" {
-  id = portkey_mcp_server.test.id
 }
 `, name)
 }

@@ -1943,117 +1943,12 @@ func (c *Client) DeleteMcpIntegration(ctx context.Context, id string) error {
 }
 
 // ============================================================================
-// MCP Servers
+// MCP Capabilities (shared types for integration capabilities)
 // ============================================================================
 
-// McpServer represents a Portkey MCP server (workspace-level provisioned integration)
-type McpServer struct {
-	ID                 string `json:"id"`
-	Slug               string `json:"slug"`
-	Name               string `json:"name"`
-	Description        string `json:"description,omitempty"`
-	McpIntegrationID   string `json:"mcp_integration_id"`
-	WorkspaceID        string `json:"workspace_id,omitempty"`
-	Status             string `json:"status,omitempty"`
-	CreatedAt          string `json:"created_at,omitempty"`
-	OrganisationID     string `json:"organisation_id,omitempty"`
-	McpIntegrationSlug string `json:"mcp_integration_slug,omitempty"`
-	McpIntegrationURL  string `json:"mcp_integration_url,omitempty"`
-	AuthType           string `json:"auth_type,omitempty"`
-	URL                string `json:"url,omitempty"`
-}
-
-// CreateMcpServerRequest represents the request to create an MCP server
-type CreateMcpServerRequest struct {
-	Name             string `json:"name"`
-	Slug             string `json:"slug,omitempty"`
-	Description      string `json:"description,omitempty"`
-	McpIntegrationID string `json:"mcp_integration_id"`
-	WorkspaceID      string `json:"workspace_id,omitempty"`
-}
-
-// CreateMcpServerResponse represents the response from creating an MCP server
-type CreateMcpServerResponse struct {
-	ID   string `json:"id"`
-	Slug string `json:"slug"`
-}
-
-// UpdateMcpServerRequest represents the request to update an MCP server
-type UpdateMcpServerRequest struct {
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-// CreateMcpServer creates a new MCP server
-func (c *Client) CreateMcpServer(ctx context.Context, req CreateMcpServerRequest) (*CreateMcpServerResponse, error) {
-	respBody, err := c.doRequest(ctx, http.MethodPost, "/mcp-servers", req)
-	if err != nil {
-		return nil, err
-	}
-
-	var response CreateMcpServerResponse
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return &response, nil
-}
-
-// GetMcpServer retrieves an MCP server by ID or slug
-func (c *Client) GetMcpServer(ctx context.Context, id string) (*McpServer, error) {
-	respBody, err := c.doRequest(ctx, http.MethodGet, "/mcp-servers/"+id, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var server McpServer
-	if err := json.Unmarshal(respBody, &server); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return &server, nil
-}
-
-// ListMcpServers retrieves all MCP servers, optionally filtered by workspace
-func (c *Client) ListMcpServers(ctx context.Context, workspaceID string) ([]McpServer, error) {
-	path := "/mcp-servers"
-	if workspaceID != "" {
-		path = fmt.Sprintf("/mcp-servers?workspace_id=%s", workspaceID)
-	}
-
-	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response struct {
-		Data []McpServer `json:"data"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return response.Data, nil
-}
-
-// UpdateMcpServer updates an MCP server
-func (c *Client) UpdateMcpServer(ctx context.Context, id string, req UpdateMcpServerRequest) (*McpServer, error) {
-	_, err := c.doRequest(ctx, http.MethodPut, "/mcp-servers/"+id, req)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.GetMcpServer(ctx, id)
-}
-
-// DeleteMcpServer deletes an MCP server
-func (c *Client) DeleteMcpServer(ctx context.Context, id string) error {
-	_, err := c.doRequest(ctx, http.MethodDelete, "/mcp-servers/"+id, nil)
-	return err
-}
 
 // ============================================================================
-// MCP Capabilities (shared types for integration and server capabilities)
+// MCP Capabilities (shared types for integration capabilities)
 // ============================================================================
 
 // McpCapability represents a capability (tool/resource/prompt) in an MCP integration or server
@@ -2089,32 +1984,6 @@ func (c *Client) GetMcpIntegrationCapabilities(ctx context.Context, id string) (
 // UpdateMcpIntegrationCapabilities updates capabilities for an MCP integration
 func (c *Client) UpdateMcpIntegrationCapabilities(ctx context.Context, id string, capabilities []McpCapability) error {
 	path := fmt.Sprintf("/mcp-integrations/%s/capabilities", id)
-	req := McpCapabilitiesUpdateRequest{Capabilities: capabilities}
-	_, err := c.doRequest(ctx, http.MethodPut, path, req)
-	return err
-}
-
-// GetMcpServerCapabilities retrieves capabilities for an MCP server
-func (c *Client) GetMcpServerCapabilities(ctx context.Context, id string) ([]McpCapability, error) {
-	path := fmt.Sprintf("/mcp-servers/%s/capabilities", id)
-	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response struct {
-		Data []McpCapability `json:"data"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return response.Data, nil
-}
-
-// UpdateMcpServerCapabilities updates capabilities for an MCP server
-func (c *Client) UpdateMcpServerCapabilities(ctx context.Context, id string, capabilities []McpCapability) error {
-	path := fmt.Sprintf("/mcp-servers/%s/capabilities", id)
 	req := McpCapabilitiesUpdateRequest{Capabilities: capabilities}
 	_, err := c.doRequest(ctx, http.MethodPut, path, req)
 	return err
@@ -2188,70 +2057,3 @@ func (c *Client) UpdateMcpIntegrationWorkspace(ctx context.Context, id string, u
 	return err
 }
 
-// ============================================================================
-// MCP Server User Access
-// ============================================================================
-
-// McpServerUserAccessItem represents a user's access to an MCP server
-type McpServerUserAccessItem struct {
-	UserID  string `json:"user_id"`
-	Enabled bool   `json:"enabled"`
-}
-
-// McpServerUserAccessResponse represents the response from listing MCP server user access
-type McpServerUserAccessResponse struct {
-	Data []McpServerUserAccessItem `json:"data"`
-}
-
-// McpServerUserAccessUpdate represents an update to user access
-type McpServerUserAccessUpdate struct {
-	UserID  string `json:"user_id"`
-	Enabled bool   `json:"enabled"`
-}
-
-// McpServerUserAccessUpdateRequest represents the request to update user access
-type McpServerUserAccessUpdateRequest struct {
-	Users []McpServerUserAccessUpdate `json:"users"`
-}
-
-// GetMcpServerUserAccess retrieves user access for an MCP server
-func (c *Client) GetMcpServerUserAccess(ctx context.Context, id string) ([]McpServerUserAccessItem, error) {
-	path := fmt.Sprintf("/mcp-servers/%s/user-access", id)
-	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response McpServerUserAccessResponse
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return response.Data, nil
-}
-
-// GetMcpServerUserAccessItem retrieves a specific user's access for an MCP server
-func (c *Client) GetMcpServerUserAccessItem(ctx context.Context, id, userID string) (*McpServerUserAccessItem, error) {
-	users, err := c.GetMcpServerUserAccess(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, u := range users {
-		if u.UserID == userID {
-			return &u, nil
-		}
-	}
-
-	return nil, fmt.Errorf("user %s not found for MCP server %s", userID, id)
-}
-
-// UpdateMcpServerUserAccess updates a single user's access for an MCP server
-func (c *Client) UpdateMcpServerUserAccess(ctx context.Context, id string, update McpServerUserAccessUpdate) error {
-	path := fmt.Sprintf("/mcp-servers/%s/user-access", id)
-	req := McpServerUserAccessUpdateRequest{
-		Users: []McpServerUserAccessUpdate{update},
-	}
-	_, err := c.doRequest(ctx, http.MethodPut, path, req)
-	return err
-}

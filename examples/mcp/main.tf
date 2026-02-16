@@ -21,7 +21,7 @@ resource "portkey_mcp_integration" "github" {
   name        = "GitHub MCP Server"
   description = "GitHub tools via MCP"
   url         = "https://mcp.github.com/sse"
-  auth_type   = "bearer"
+  auth_type   = "headers"
   transport   = "sse"
 
   # Optional: JSON string of auth configuration (sensitive)
@@ -38,19 +38,6 @@ resource "portkey_mcp_integration_workspace_access" "github_dev" {
   mcp_integration_id = portkey_mcp_integration.github.id
   workspace_id       = data.portkey_workspace.dev.id
   enabled            = true
-}
-
-# ============================================================================
-# MCP Server (workspace-level) - Provision the integration to a workspace
-# ============================================================================
-
-resource "portkey_mcp_server" "github_dev" {
-  name               = "GitHub Dev"
-  description        = "GitHub MCP for dev workspace"
-  mcp_integration_id = portkey_mcp_integration.github.id
-  workspace_id       = data.portkey_workspace.dev.id
-
-  depends_on = [portkey_mcp_integration_workspace_access.github_dev]
 }
 
 # ============================================================================
@@ -75,32 +62,6 @@ resource "portkey_mcp_integration_capabilities" "github" {
 }
 
 # ============================================================================
-# MCP Server Capabilities - Further restrict at workspace level
-# ============================================================================
-
-resource "portkey_mcp_server_capabilities" "github_dev" {
-  mcp_server_id = portkey_mcp_server.github_dev.id
-
-  capabilities = [
-    {
-      name    = "create_pull_request"
-      type    = "tool"
-      enabled = true
-    },
-  ]
-}
-
-# ============================================================================
-# MCP Server User Access - Control per-user access
-# ============================================================================
-
-# resource "portkey_mcp_server_user_access" "github_dev_admin" {
-#   mcp_server_id = portkey_mcp_server.github_dev.id
-#   user_id       = var.admin_user_id
-#   enabled       = true
-# }
-
-# ============================================================================
 # Data Sources - Read MCP resources
 # ============================================================================
 
@@ -108,17 +69,12 @@ data "portkey_mcp_integrations" "all" {
   depends_on = [portkey_mcp_integration.github]
 }
 
-data "portkey_mcp_servers" "dev" {
-  workspace_id = data.portkey_workspace.dev.id
-  depends_on   = [portkey_mcp_server.github_dev]
-}
-
 # ============================================================================
 # Variables
 # ============================================================================
 
 variable "workspace_id" {
-  description = "Workspace ID for MCP server provisioning"
+  description = "Workspace ID for MCP integration provisioning"
   type        = string
 }
 
@@ -130,14 +86,6 @@ output "mcp_integration_id" {
   value = portkey_mcp_integration.github.id
 }
 
-output "mcp_server_id" {
-  value = portkey_mcp_server.github_dev.id
-}
-
 output "mcp_integrations_count" {
   value = length(data.portkey_mcp_integrations.all.integrations)
-}
-
-output "mcp_servers_count" {
-  value = length(data.portkey_mcp_servers.dev.servers)
 }

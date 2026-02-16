@@ -2126,18 +2126,18 @@ func (c *Client) UpdateMcpServerCapabilities(ctx context.Context, id string, cap
 
 // McpIntegrationWorkspace represents workspace access for an MCP integration
 type McpIntegrationWorkspace struct {
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID string `json:"id"`
 	Enabled     bool   `json:"enabled"`
 }
 
 // McpIntegrationWorkspacesResponse represents the response from listing MCP integration workspaces
 type McpIntegrationWorkspacesResponse struct {
-	Data []McpIntegrationWorkspace `json:"data"`
+	Workspaces []McpIntegrationWorkspace `json:"workspaces"`
 }
 
 // McpIntegrationWorkspaceUpdate represents an update to workspace access
 type McpIntegrationWorkspaceUpdate struct {
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID string `json:"id"`
 	Enabled     bool   `json:"enabled"`
 }
 
@@ -2159,7 +2159,7 @@ func (c *Client) GetMcpIntegrationWorkspaces(ctx context.Context, id string) ([]
 		return nil, fmt.Errorf("error unmarshaling response: %w", err)
 	}
 
-	return response.Data, nil
+	return response.Workspaces, nil
 }
 
 // GetMcpIntegrationWorkspace retrieves a specific workspace's access for an MCP integration

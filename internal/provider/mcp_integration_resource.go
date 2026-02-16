@@ -96,14 +96,14 @@ MCP integrations define an MCP server in the organization's registry, specifying
 				Description: "Authentication type for the MCP server.",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.OneOf("none", "api_key", "bearer", "oauth2"),
+					stringvalidator.OneOf("none", "headers", "oauth_auto"),
 				},
 			},
 			"transport": schema.StringAttribute{
 				Description: "Transport protocol for the MCP server.",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.OneOf("sse", "streamable_http"),
+					stringvalidator.OneOf("http", "sse"),
 				},
 			},
 			"configurations": schema.StringAttribute{

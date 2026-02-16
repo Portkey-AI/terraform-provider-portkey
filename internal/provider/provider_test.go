@@ -100,14 +100,6 @@ func getTestVirtualKey() string {
 	return ""
 }
 
-// getTestUserID returns a user ID for testing
-func getTestUserID() string {
-	if v := os.Getenv("TEST_USER_ID"); v != "" {
-		return v
-	}
-	return ""
-}
-
 // providerConfig is a shared configuration for all acceptance tests.
 const providerConfig = `
 provider "portkey" {}

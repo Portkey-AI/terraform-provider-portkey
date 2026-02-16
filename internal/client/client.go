@@ -1946,11 +1946,6 @@ func (c *Client) DeleteMcpIntegration(ctx context.Context, id string) error {
 // MCP Capabilities (shared types for integration capabilities)
 // ============================================================================
 
-
-// ============================================================================
-// MCP Capabilities (shared types for integration capabilities)
-// ============================================================================
-
 // McpCapability represents a capability (tool/resource/prompt) in an MCP integration or server
 type McpCapability struct {
 	Name    string `json:"name"`

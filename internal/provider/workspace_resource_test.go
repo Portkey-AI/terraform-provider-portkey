@@ -234,6 +234,13 @@ func TestAccWorkspaceResource_withUsageLimits(t *testing.T) {
 					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.periodic_reset", "monthly"),
 				),
 			},
+			// ImportState testing
+			{
+				ResourceName:            "portkey_workspace.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_at", "updated_at"},
+			},
 			// Update usage_limits
 			{
 				Config: testAccWorkspaceResourceConfigWithUsageLimits(rName+"-upd", 1000, 800),

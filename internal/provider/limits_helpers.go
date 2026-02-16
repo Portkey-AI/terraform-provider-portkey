@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"context"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -43,6 +45,68 @@ type workspaceRateLimitsModel struct {
 	Type  types.String `tfsdk:"type"`
 	Unit  types.String `tfsdk:"unit"`
 	Value types.Int64  `tfsdk:"value"`
+}
+
+// buildWorkspaceLimitsFromPlan extracts usage_limits and rate_limits from a workspace plan.
+// When the plan value is null (user removed the block), returns an empty non-nil slice
+// so the API receives [] to clear limits (omitempty won't omit a non-nil empty slice).
+// When the plan value is unknown, returns nil (omitted from JSON).
+func buildWorkspaceLimitsFromPlan(ctx context.Context, plan *workspaceResourceModel) ([]client.IntegrationWorkspaceUsageLimits, []client.IntegrationWorkspaceRateLimits, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var usageLimits []client.IntegrationWorkspaceUsageLimits
+	var rateLimits []client.IntegrationWorkspaceRateLimits
+
+	// Handle usage_limits
+	if plan.UsageLimits.IsNull() {
+		// User removed usage_limits block: send empty array to clear
+		usageLimits = []client.IntegrationWorkspaceUsageLimits{}
+	} else if !plan.UsageLimits.IsUnknown() {
+		var ulModels []workspaceUsageLimitsModel
+		diags.Append(plan.UsageLimits.ElementsAs(ctx, &ulModels, false)...)
+		if diags.HasError() {
+			return nil, nil, diags
+		}
+		for _, ul := range ulModels {
+			clientUL := client.IntegrationWorkspaceUsageLimits{
+				Type:          ul.Type.ValueString(),
+				PeriodicReset: ul.PeriodicReset.ValueString(),
+			}
+			if !ul.CreditLimit.IsNull() {
+				v := int(ul.CreditLimit.ValueInt64())
+				clientUL.CreditLimit = &v
+			}
+			if !ul.AlertThreshold.IsNull() {
+				v := int(ul.AlertThreshold.ValueInt64())
+				clientUL.AlertThreshold = &v
+			}
+			usageLimits = append(usageLimits, clientUL)
+		}
+	}
+
+	// Handle rate_limits
+	if plan.RateLimits.IsNull() {
+		// User removed rate_limits block: send empty array to clear
+		rateLimits = []client.IntegrationWorkspaceRateLimits{}
+	} else if !plan.RateLimits.IsUnknown() {
+		var rlModels []workspaceRateLimitsModel
+		diags.Append(plan.RateLimits.ElementsAs(ctx, &rlModels, false)...)
+		if diags.HasError() {
+			return nil, nil, diags
+		}
+		for _, rl := range rlModels {
+			clientRL := client.IntegrationWorkspaceRateLimits{
+				Type: rl.Type.ValueString(),
+				Unit: rl.Unit.ValueString(),
+			}
+			if !rl.Value.IsNull() {
+				v := int(rl.Value.ValueInt64())
+				clientRL.Value = &v
+			}
+			rateLimits = append(rateLimits, clientRL)
+		}
+	}
+
+	return usageLimits, rateLimits, diags
 }
 
 // workspaceUsageLimitsToTerraformList converts client workspace usage limits to a Terraform list
@@ -133,7 +197,8 @@ var (
 	apiKeyRateLimitsObjectType = types.ObjectType{AttrTypes: apiKeyRateLimitsAttrTypes}
 )
 
-// apiKeyUsageLimitsToTerraform converts client *UsageLimits to a Terraform Object
+// apiKeyUsageLimitsToTerraform converts client *UsageLimits to a Terraform Object.
+// Returns null object when the API returns nil (no limits configured).
 func apiKeyUsageLimitsToTerraform(ul *client.UsageLimits) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
@@ -157,7 +222,8 @@ func apiKeyUsageLimitsToTerraform(ul *client.UsageLimits) (types.Object, diag.Di
 	return obj, diags
 }
 
-// terraformToAPIKeyUsageLimits converts a Terraform Object to client *UsageLimits
+// terraformToAPIKeyUsageLimits converts a Terraform Object to client *UsageLimits.
+// Uses safe type assertions with comma-ok pattern.
 func terraformToAPIKeyUsageLimits(obj types.Object) *client.UsageLimits {
 	if obj.IsNull() || obj.IsUnknown() {
 		return nil
@@ -166,20 +232,30 @@ func terraformToAPIKeyUsageLimits(obj types.Object) *client.UsageLimits {
 	ul := &client.UsageLimits{}
 
 	if v, ok := obj.Attributes()["credits_limit"]; ok && !v.IsNull() && !v.IsUnknown() {
-		f := v.(types.Float64).ValueFloat64()
-		ul.CreditsLimit = &f
+		if f64Val, ok := v.(types.Float64); ok {
+			f := f64Val.ValueFloat64()
+			ul.CreditsLimit = &f
+		}
 	}
 	if v, ok := obj.Attributes()["credits_limit_type"]; ok && !v.IsNull() && !v.IsUnknown() {
-		ul.CreditsLimitType = v.(types.String).ValueString()
+		if strVal, ok := v.(types.String); ok {
+			ul.CreditsLimitType = strVal.ValueString()
+		}
 	}
 
 	return ul
 }
 
-// apiKeyRateLimitsToTerraformList converts client []RateLimit to a Terraform List
-// Note: API key RateLimit.Value is int (not *int like workspace rate limits)
+// apiKeyRateLimitsToTerraformList converts client []RateLimit to a Terraform List.
+// Returns null list when the API returns nil (no limits configured), matching the
+// convention for Terraform Optional+Computed list attributes.
+// Note: API key RateLimit.Value is int (not *int like workspace rate limits).
 func apiKeyRateLimitsToTerraformList(limits []client.RateLimit) (types.List, diag.Diagnostics) {
 	var diags diag.Diagnostics
+
+	if limits == nil {
+		return types.ListNull(apiKeyRateLimitsObjectType), diags
+	}
 
 	if len(limits) == 0 {
 		return types.ListValueMust(apiKeyRateLimitsObjectType, []attr.Value{}), diags
@@ -206,7 +282,8 @@ func apiKeyRateLimitsToTerraformList(limits []client.RateLimit) (types.List, dia
 	return list, diags
 }
 
-// terraformToAPIKeyRateLimits converts a Terraform List to client []RateLimit
+// terraformToAPIKeyRateLimits converts a Terraform List to client []RateLimit.
+// Uses safe type assertions with comma-ok pattern.
 func terraformToAPIKeyRateLimits(list types.List) []client.RateLimit {
 	if list.IsNull() || list.IsUnknown() {
 		return nil
@@ -214,17 +291,26 @@ func terraformToAPIKeyRateLimits(list types.List) []client.RateLimit {
 
 	var rateLimits []client.RateLimit
 	for _, elem := range list.Elements() {
-		obj := elem.(types.Object)
+		obj, ok := elem.(types.Object)
+		if !ok {
+			continue
+		}
 		rl := client.RateLimit{}
 
 		if v, ok := obj.Attributes()["type"]; ok && !v.IsNull() && !v.IsUnknown() {
-			rl.Type = v.(types.String).ValueString()
+			if strVal, ok := v.(types.String); ok {
+				rl.Type = strVal.ValueString()
+			}
 		}
 		if v, ok := obj.Attributes()["unit"]; ok && !v.IsNull() && !v.IsUnknown() {
-			rl.Unit = v.(types.String).ValueString()
+			if strVal, ok := v.(types.String); ok {
+				rl.Unit = strVal.ValueString()
+			}
 		}
 		if v, ok := obj.Attributes()["value"]; ok && !v.IsNull() && !v.IsUnknown() {
-			rl.Value = int(v.(types.Int64).ValueInt64())
+			if i64Val, ok := v.(types.Int64); ok {
+				rl.Value = int(i64Val.ValueInt64())
+			}
 		}
 
 		rateLimits = append(rateLimits, rl)
@@ -232,3 +318,70 @@ func terraformToAPIKeyRateLimits(list types.List) []client.RateLimit {
 
 	return rateLimits
 }
+
+// ============================================================================
+// Integration workspace access limit helpers
+// ============================================================================
+
+// buildIntegrationWorkspaceLimitsFromPlan extracts usage_limits and rate_limits
+// from an integration workspace access plan. When the plan value is null (user
+// removed the block), returns an empty non-nil slice so the API receives [] to
+// clear limits. When the plan value is unknown, returns nil (omitted from JSON).
+func buildIntegrationWorkspaceLimitsFromPlan(ctx context.Context, plan *integrationWorkspaceAccessResourceModel) ([]client.IntegrationWorkspaceUsageLimits, []client.IntegrationWorkspaceRateLimits, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var usageLimits []client.IntegrationWorkspaceUsageLimits
+	var rateLimits []client.IntegrationWorkspaceRateLimits
+
+	// Handle usage_limits
+	if plan.UsageLimits.IsNull() {
+		// User removed usage_limits block: send empty array to clear
+		usageLimits = []client.IntegrationWorkspaceUsageLimits{}
+	} else if !plan.UsageLimits.IsUnknown() {
+		var ulModels []workspaceUsageLimitsModel
+		diags.Append(plan.UsageLimits.ElementsAs(ctx, &ulModels, false)...)
+		if diags.HasError() {
+			return nil, nil, diags
+		}
+		for _, ul := range ulModels {
+			clientUL := client.IntegrationWorkspaceUsageLimits{
+				Type:          ul.Type.ValueString(),
+				PeriodicReset: ul.PeriodicReset.ValueString(),
+			}
+			if !ul.CreditLimit.IsNull() {
+				v := int(ul.CreditLimit.ValueInt64())
+				clientUL.CreditLimit = &v
+			}
+			if !ul.AlertThreshold.IsNull() {
+				v := int(ul.AlertThreshold.ValueInt64())
+				clientUL.AlertThreshold = &v
+			}
+			usageLimits = append(usageLimits, clientUL)
+		}
+	}
+
+	// Handle rate_limits
+	if plan.RateLimits.IsNull() {
+		// User removed rate_limits block: send empty array to clear
+		rateLimits = []client.IntegrationWorkspaceRateLimits{}
+	} else if !plan.RateLimits.IsUnknown() {
+		var rlModels []workspaceRateLimitsModel
+		diags.Append(plan.RateLimits.ElementsAs(ctx, &rlModels, false)...)
+		if diags.HasError() {
+			return nil, nil, diags
+		}
+		for _, rl := range rlModels {
+			clientRL := client.IntegrationWorkspaceRateLimits{
+				Type: rl.Type.ValueString(),
+				Unit: rl.Unit.ValueString(),
+			}
+			if !rl.Value.IsNull() {
+				v := int(rl.Value.ValueInt64())
+				clientRL.Value = &v
+			}
+			rateLimits = append(rateLimits, clientRL)
+		}
+	}
+
+	return usageLimits, rateLimits, diags
+}
+

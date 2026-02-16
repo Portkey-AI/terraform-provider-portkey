@@ -392,60 +392,21 @@ func (r *integrationWorkspaceAccessResource) ImportState(ctx context.Context, re
 
 // Helper functions
 
-// buildWorkspaceUpdateRequest builds a client.WorkspaceUpdateRequest from the resource model
+// buildWorkspaceUpdateRequest builds a client.WorkspaceUpdateRequest from the resource model.
+// Delegates to buildIntegrationWorkspaceLimitsFromPlan which handles null plan values
+// (user removed block) by sending an empty array to clear limits.
 func buildWorkspaceUpdateRequest(ctx context.Context, plan *integrationWorkspaceAccessResourceModel) (client.WorkspaceUpdateRequest, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
 	workspaceReq := client.WorkspaceUpdateRequest{
 		ID:      plan.WorkspaceID.ValueString(),
 		Enabled: plan.Enabled.ValueBool(),
 	}
 
-	// Parse usage limits
-	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
-		var usageLimits []workspaceUsageLimitsModel
-		diags.Append(plan.UsageLimits.ElementsAs(ctx, &usageLimits, false)...)
-		if diags.HasError() {
-			return workspaceReq, diags
-		}
-
-		for _, ul := range usageLimits {
-			clientUL := client.IntegrationWorkspaceUsageLimits{
-				Type:          ul.Type.ValueString(),
-				PeriodicReset: ul.PeriodicReset.ValueString(),
-			}
-			if !ul.CreditLimit.IsNull() {
-				v := int(ul.CreditLimit.ValueInt64())
-				clientUL.CreditLimit = &v
-			}
-			if !ul.AlertThreshold.IsNull() {
-				v := int(ul.AlertThreshold.ValueInt64())
-				clientUL.AlertThreshold = &v
-			}
-			workspaceReq.UsageLimits = append(workspaceReq.UsageLimits, clientUL)
-		}
+	usageLimits, rateLimits, diags := buildIntegrationWorkspaceLimitsFromPlan(ctx, plan)
+	if diags.HasError() {
+		return workspaceReq, diags
 	}
-
-	// Parse rate limits
-	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
-		var rateLimits []workspaceRateLimitsModel
-		diags.Append(plan.RateLimits.ElementsAs(ctx, &rateLimits, false)...)
-		if diags.HasError() {
-			return workspaceReq, diags
-		}
-
-		for _, rl := range rateLimits {
-			clientRL := client.IntegrationWorkspaceRateLimits{
-				Type: rl.Type.ValueString(),
-				Unit: rl.Unit.ValueString(),
-			}
-			if !rl.Value.IsNull() {
-				v := int(rl.Value.ValueInt64())
-				clientRL.Value = &v
-			}
-			workspaceReq.RateLimits = append(workspaceReq.RateLimits, clientRL)
-		}
-	}
+	workspaceReq.UsageLimits = usageLimits
+	workspaceReq.RateLimits = rateLimits
 
 	return workspaceReq, diags
 }

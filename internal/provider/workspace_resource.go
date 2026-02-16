@@ -190,51 +190,14 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		Description: plan.Description.ValueString(),
 	}
 
-	// Handle usage_limits
-	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
-		var usageLimits []workspaceUsageLimitsModel
-		diags = plan.UsageLimits.ElementsAs(ctx, &usageLimits, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		for _, ul := range usageLimits {
-			clientUL := client.IntegrationWorkspaceUsageLimits{
-				Type:          ul.Type.ValueString(),
-				PeriodicReset: ul.PeriodicReset.ValueString(),
-			}
-			if !ul.CreditLimit.IsNull() {
-				v := int(ul.CreditLimit.ValueInt64())
-				clientUL.CreditLimit = &v
-			}
-			if !ul.AlertThreshold.IsNull() {
-				v := int(ul.AlertThreshold.ValueInt64())
-				clientUL.AlertThreshold = &v
-			}
-			createReq.UsageLimits = append(createReq.UsageLimits, clientUL)
-		}
+	// Build limits from plan
+	usageLimits, rateLimits, limitDiags := buildWorkspaceLimitsFromPlan(ctx, &plan)
+	resp.Diagnostics.Append(limitDiags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-
-	// Handle rate_limits
-	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
-		var rateLimits []workspaceRateLimitsModel
-		diags = plan.RateLimits.ElementsAs(ctx, &rateLimits, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		for _, rl := range rateLimits {
-			clientRL := client.IntegrationWorkspaceRateLimits{
-				Type: rl.Type.ValueString(),
-				Unit: rl.Unit.ValueString(),
-			}
-			if !rl.Value.IsNull() {
-				v := int(rl.Value.ValueInt64())
-				clientRL.Value = &v
-			}
-			createReq.RateLimits = append(createReq.RateLimits, clientRL)
-		}
-	}
+	createReq.UsageLimits = usageLimits
+	createReq.RateLimits = rateLimits
 
 	// Handle metadata
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
@@ -384,51 +347,14 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		Description: plan.Description.ValueString(),
 	}
 
-	// Handle usage_limits
-	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
-		var usageLimits []workspaceUsageLimitsModel
-		diags = plan.UsageLimits.ElementsAs(ctx, &usageLimits, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		for _, ul := range usageLimits {
-			clientUL := client.IntegrationWorkspaceUsageLimits{
-				Type:          ul.Type.ValueString(),
-				PeriodicReset: ul.PeriodicReset.ValueString(),
-			}
-			if !ul.CreditLimit.IsNull() {
-				v := int(ul.CreditLimit.ValueInt64())
-				clientUL.CreditLimit = &v
-			}
-			if !ul.AlertThreshold.IsNull() {
-				v := int(ul.AlertThreshold.ValueInt64())
-				clientUL.AlertThreshold = &v
-			}
-			updateReq.UsageLimits = append(updateReq.UsageLimits, clientUL)
-		}
+	// Build limits from plan
+	usageLimits, rateLimits, limitDiags := buildWorkspaceLimitsFromPlan(ctx, &plan)
+	resp.Diagnostics.Append(limitDiags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-
-	// Handle rate_limits
-	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
-		var rateLimits []workspaceRateLimitsModel
-		diags = plan.RateLimits.ElementsAs(ctx, &rateLimits, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		for _, rl := range rateLimits {
-			clientRL := client.IntegrationWorkspaceRateLimits{
-				Type: rl.Type.ValueString(),
-				Unit: rl.Unit.ValueString(),
-			}
-			if !rl.Value.IsNull() {
-				v := int(rl.Value.ValueInt64())
-				clientRL.Value = &v
-			}
-			updateReq.RateLimits = append(updateReq.RateLimits, clientRL)
-		}
-	}
+	updateReq.UsageLimits = usageLimits
+	updateReq.RateLimits = rateLimits
 
 	// Handle metadata
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
@@ -443,7 +369,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		}
 	}
 
-	_, err := r.client.UpdateWorkspace(ctx, plan.ID.ValueString(), updateReq)
+	workspace, err := r.client.UpdateWorkspace(ctx, plan.ID.ValueString(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Updating Portkey Workspace",
@@ -452,8 +378,37 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	// Note: Don't update timestamps here - the plan already has the expected values
-	// from UseStateForUnknown. Let Read update them on next refresh.
+	// Map response body to schema and populate Computed attribute values
+	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+
+	// Handle usage_limits from API
+	ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.UsageLimits = ulList
+
+	// Handle rate_limits from API
+	rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.RateLimits = rlList
+
+	// Handle metadata from API response
+	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
+		metadataMap, mDiags := types.MapValueFrom(ctx, types.StringType, workspace.Defaults.Metadata)
+		resp.Diagnostics.Append(mDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.Metadata = metadataMap
+	} else if plan.Metadata.IsNull() {
+		plan.Metadata = types.MapNull(types.StringType)
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

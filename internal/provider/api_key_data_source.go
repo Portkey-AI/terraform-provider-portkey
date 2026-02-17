@@ -101,12 +101,16 @@ func (d *apiKeyDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 				Description: "Usage limits for this API key.",
 				Computed:    true,
 				Attributes: map[string]schema.Attribute{
-					"credits_limit": schema.Float64Attribute{
+					"credit_limit": schema.Int64Attribute{
 						Description: "The credit limit value.",
 						Computed:    true,
 					},
-					"credits_limit_type": schema.StringAttribute{
-						Description: "Period for the credit limit: 'per_day', 'monthly', or 'total'.",
+					"alert_threshold": schema.Int64Attribute{
+						Description: "Alert threshold percentage (0-100).",
+						Computed:    true,
+					},
+					"periodic_reset": schema.StringAttribute{
+						Description: "When to reset the usage: 'monthly' or 'weekly'.",
 						Computed:    true,
 					},
 				},

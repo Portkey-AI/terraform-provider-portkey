@@ -41,8 +41,8 @@ func TestAccAPIKeyDataSource_withUsageLimits(t *testing.T) {
 					resource.TestCheckResourceAttrSet("data.portkey_api_key.test", "id"),
 					resource.TestCheckResourceAttr("data.portkey_api_key.test", "name", name),
 					resource.TestCheckResourceAttr("data.portkey_api_key.test", "status", "active"),
-					resource.TestCheckResourceAttr("data.portkey_api_key.test", "usage_limits.credits_limit", "500"),
-					resource.TestCheckResourceAttr("data.portkey_api_key.test", "usage_limits.credits_limit_type", "monthly"),
+					resource.TestCheckResourceAttr("data.portkey_api_key.test", "usage_limits.credit_limit", "500"),
+					resource.TestCheckResourceAttr("data.portkey_api_key.test", "usage_limits.periodic_reset", "monthly"),
 				),
 			},
 		},
@@ -95,8 +95,8 @@ resource "portkey_api_key" "test" {
   scopes   = ["providers.list"]
 
   usage_limits = {
-    credits_limit      = 500
-    credits_limit_type = "monthly"
+    credit_limit      = 500
+    periodic_reset = "monthly"
   }
 }
 

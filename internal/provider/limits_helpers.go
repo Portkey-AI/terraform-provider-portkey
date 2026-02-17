@@ -184,8 +184,9 @@ func workspaceRateLimitsToTerraformList(limits []client.IntegrationWorkspaceRate
 // Type definitions for API key nested attributes
 var (
 	apiKeyUsageLimitsAttrTypes = map[string]attr.Type{
-		"credits_limit":      types.Float64Type,
-		"credits_limit_type": types.StringType,
+		"credit_limit":    types.Int64Type,
+		"alert_threshold": types.Int64Type,
+		"periodic_reset":  types.StringType,
 	}
 
 	apiKeyRateLimitsAttrTypes = map[string]attr.Type{
@@ -207,14 +208,18 @@ func apiKeyUsageLimitsToTerraform(ul *client.UsageLimits) (types.Object, diag.Di
 	}
 
 	attrs := map[string]attr.Value{
-		"credits_limit":      types.Float64Null(),
-		"credits_limit_type": types.StringNull(),
+		"credit_limit":    types.Int64Null(),
+		"alert_threshold": types.Int64Null(),
+		"periodic_reset":  types.StringNull(),
 	}
-	if ul.CreditsLimit != nil {
-		attrs["credits_limit"] = types.Float64Value(*ul.CreditsLimit)
+	if ul.CreditLimit != nil {
+		attrs["credit_limit"] = types.Int64Value(int64(*ul.CreditLimit))
 	}
-	if ul.CreditsLimitType != "" {
-		attrs["credits_limit_type"] = types.StringValue(ul.CreditsLimitType)
+	if ul.AlertThreshold != nil {
+		attrs["alert_threshold"] = types.Int64Value(int64(*ul.AlertThreshold))
+	}
+	if ul.PeriodicReset != "" {
+		attrs["periodic_reset"] = types.StringValue(ul.PeriodicReset)
 	}
 
 	obj, d := types.ObjectValue(apiKeyUsageLimitsAttrTypes, attrs)
@@ -231,15 +236,21 @@ func terraformToAPIKeyUsageLimits(obj types.Object) *client.UsageLimits {
 
 	ul := &client.UsageLimits{}
 
-	if v, ok := obj.Attributes()["credits_limit"]; ok && !v.IsNull() && !v.IsUnknown() {
-		if f64Val, ok := v.(types.Float64); ok {
-			f := f64Val.ValueFloat64()
-			ul.CreditsLimit = &f
+	if v, ok := obj.Attributes()["credit_limit"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if i64Val, ok := v.(types.Int64); ok {
+			i := int(i64Val.ValueInt64())
+			ul.CreditLimit = &i
 		}
 	}
-	if v, ok := obj.Attributes()["credits_limit_type"]; ok && !v.IsNull() && !v.IsUnknown() {
+	if v, ok := obj.Attributes()["alert_threshold"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if i64Val, ok := v.(types.Int64); ok {
+			i := int(i64Val.ValueInt64())
+			ul.AlertThreshold = &i
+		}
+	}
+	if v, ok := obj.Attributes()["periodic_reset"]; ok && !v.IsNull() && !v.IsUnknown() {
 		if strVal, ok := v.(types.String); ok {
-			ul.CreditsLimitType = strVal.ValueString()
+			ul.PeriodicReset = strVal.ValueString()
 		}
 	}
 

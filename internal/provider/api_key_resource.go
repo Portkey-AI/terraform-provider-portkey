@@ -139,15 +139,19 @@ API Key Types:
 				Optional:    true,
 				Computed:    true,
 				Attributes: map[string]schema.Attribute{
-					"credits_limit": schema.Float64Attribute{
-						Description: "The credit limit value (e.g. 500.0 for $500).",
+					"credit_limit": schema.Int64Attribute{
+						Description: "The credit limit value.",
 						Optional:    true,
 					},
-					"credits_limit_type": schema.StringAttribute{
-						Description: "Period for the credit limit: 'per_day', 'monthly', or 'total'.",
+					"alert_threshold": schema.Int64Attribute{
+						Description: "Alert threshold in dollars. Triggers email notification when usage reaches this amount.",
+						Optional:    true,
+					},
+					"periodic_reset": schema.StringAttribute{
+						Description: "When to reset the usage: 'monthly' or 'weekly'.",
 						Optional:    true,
 						Validators: []validator.String{
-							stringvalidator.OneOf("per_day", "monthly", "total"),
+							stringvalidator.OneOf("monthly", "weekly"),
 						},
 					},
 				},

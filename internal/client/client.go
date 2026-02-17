@@ -616,10 +616,12 @@ type RateLimit struct {
 	Value int    `json:"value"`
 }
 
-// UsageLimits represents usage limit configuration
+// UsageLimits represents usage limit configuration for API keys.
+// Uses the same field names as workspace usage limits (credit_limit, periodic_reset, alert_threshold).
 type UsageLimits struct {
-	CreditsLimit     *float64 `json:"credits_limit,omitempty"`
-	CreditsLimitType string   `json:"credits_limit_type,omitempty"` // per_day, monthly, total
+	CreditLimit    *int   `json:"credit_limit,omitempty"`
+	AlertThreshold *int   `json:"alert_threshold,omitempty"`
+	PeriodicReset  string `json:"periodic_reset,omitempty"` // monthly, weekly
 }
 
 // CreateAPIKeyRequest represents the request to create an API key

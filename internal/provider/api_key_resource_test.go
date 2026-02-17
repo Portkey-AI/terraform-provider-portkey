@@ -284,17 +284,17 @@ func TestAccAPIKeyResource_withUsageLimits(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
 					resource.TestCheckResourceAttr("portkey_api_key.test", "name", name),
-					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit", "500"),
-					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit_type", "monthly"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credit_limit", "500"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.periodic_reset", "monthly"),
 				),
 			},
 			// Update usage_limits
 			{
-				Config: testAccAPIKeyResourceConfigWithUsageLimits(nameUpdated, 1000, "per_day"),
+				Config: testAccAPIKeyResourceConfigWithUsageLimits(nameUpdated, 1000, "weekly"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("portkey_api_key.test", "name", nameUpdated),
-					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit", "1000"),
-					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credits_limit_type", "per_day"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credit_limit", "1000"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.periodic_reset", "weekly"),
 				),
 			},
 			// Delete testing automatically occurs in TestCase
@@ -337,7 +337,7 @@ func TestAccAPIKeyResource_withRateLimits(t *testing.T) {
 	})
 }
 
-func testAccAPIKeyResourceConfigWithUsageLimits(name string, creditsLimit int, limitType string) string {
+func testAccAPIKeyResourceConfigWithUsageLimits(name string, creditLimit int, periodicReset string) string {
 	return fmt.Sprintf(`
 resource "portkey_api_key" "test" {
   name     = %[1]q
@@ -346,11 +346,11 @@ resource "portkey_api_key" "test" {
   scopes   = ["providers.list"]
 
   usage_limits = {
-    credits_limit      = %[2]d
-    credits_limit_type = %[3]q
+    credit_limit   = %[2]d
+    periodic_reset = %[3]q
   }
 }
-`, name, creditsLimit, limitType)
+`, name, creditLimit, periodicReset)
 }
 
 func testAccAPIKeyResourceConfigWithRateLimits(name, rlType, rlUnit string, rlValue int) string {

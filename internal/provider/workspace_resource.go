@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -88,11 +87,8 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 							Optional:    true,
 						},
 						"alert_threshold": schema.Int64Attribute{
-							Description: "Alert threshold percentage (0-100).",
+							Description: "Alert threshold in dollars. Triggers email notification when usage reaches this amount.",
 							Optional:    true,
-							Validators: []validator.Int64{
-								int64validator.Between(0, 100),
-							},
 						},
 						"periodic_reset": schema.StringAttribute{
 							Description: "When to reset the usage: 'monthly' or 'weekly'.",
@@ -146,9 +142,6 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"updated_at": schema.StringAttribute{
 				Description: "Timestamp when the workspace was last updated.",
 				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 		},
 	}

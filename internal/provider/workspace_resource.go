@@ -375,21 +375,32 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
-	// Handle usage_limits from API
-	ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
-	resp.Diagnostics.Append(ulDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Handle usage_limits after Update.
+	// If the plan has concrete values, keep them. Otherwise (null or unknown),
+	// read back from the API response. The API may return stale data after
+	// clearing limits, but we must always resolve to a known value.
+	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
+		// Plan has user-specified values — trust them over potentially stale API response
+	} else {
+		ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+		resp.Diagnostics.Append(ulDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.UsageLimits = ulList
 	}
-	plan.UsageLimits = ulList
 
-	// Handle rate_limits from API
-	rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
-	resp.Diagnostics.Append(rlDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Handle rate_limits after Update — same approach
+	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
+		// Plan has user-specified values — trust them
+	} else {
+		rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+		resp.Diagnostics.Append(rlDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.RateLimits = rlList
 	}
-	plan.RateLimits = rlList
 
 	// Handle metadata from API response
 	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {

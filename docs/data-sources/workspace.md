@@ -44,7 +44,7 @@ Read-Only:
 
 Read-Only:
 
-- `alert_threshold` (Number) Alert threshold percentage.
+- `alert_threshold` (Number) Alert threshold in dollars.
 - `credit_limit` (Number) The credit limit value.
 - `periodic_reset` (String) When to reset the usage.
 - `type` (String) Type of usage limit.

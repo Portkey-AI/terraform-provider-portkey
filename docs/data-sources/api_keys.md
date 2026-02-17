@@ -60,5 +60,6 @@ Read-Only:
 
 Read-Only:
 
-- `credits_limit` (Number) The credit limit value.
-- `credits_limit_type` (String) Period for the credit limit.
+- `credit_limit` (Number) The credit limit value.
+- `alert_threshold` (Number) Alert threshold in dollars.
+- `periodic_reset` (String) When to reset the usage.

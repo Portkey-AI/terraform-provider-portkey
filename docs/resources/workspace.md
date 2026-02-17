@@ -51,6 +51,6 @@ Required:
 
 Optional:
 
-- `alert_threshold` (Number) Alert threshold percentage (0-100).
+- `alert_threshold` (Number) Alert threshold in dollars.
 - `credit_limit` (Number) The credit limit value.
 - `periodic_reset` (String) When to reset the usage: 'monthly' or 'weekly'.

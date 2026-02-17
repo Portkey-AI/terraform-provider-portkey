@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -122,7 +121,7 @@ func (d *apiKeysDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 									Computed:    true,
 								},
 								"alert_threshold": schema.Int64Attribute{
-									Description: "Alert threshold percentage (0-100).",
+									Description: "Alert threshold in dollars.",
 									Computed:    true,
 								},
 								"periodic_reset": schema.StringAttribute{
@@ -227,7 +226,7 @@ func (d *apiKeysDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	state.APIKeys = make([]apiKeyDataItemModel, 0, len(apiKeys))
 	for _, apiKey := range apiKeys {
 		// Parse type
-		parsedType, parsedSubType := parseAPIKeyTypeList(apiKey.Type)
+		parsedType, parsedSubType := parseAPIKeyType(apiKey.Type)
 
 		// Handle scopes
 		var scopesList types.List
@@ -332,11 +331,3 @@ func (d *apiKeysDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	}
 }
 
-// parseAPIKeyTypeList parses the combined type field for list data source
-func parseAPIKeyTypeList(combinedType string) (keyType, subType string) {
-	parts := strings.SplitN(combinedType, "-", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return combinedType, ""
-}

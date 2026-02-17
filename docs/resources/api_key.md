@@ -63,5 +63,6 @@ Required:
 
 Optional:
 
-- `credits_limit` (Number) The credit limit value (e.g. 500.0 for $500).
-- `credits_limit_type` (String) Period for the credit limit: 'per_day', 'monthly', or 'total'.
+- `credit_limit` (Number) The credit limit value (e.g. 500 for $500).
+- `alert_threshold` (Number) Alert threshold in dollars. Triggers email notification when usage reaches this amount.
+- `periodic_reset` (String) When to reset the usage: 'monthly' or 'weekly'.

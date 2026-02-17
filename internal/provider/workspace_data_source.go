@@ -75,7 +75,7 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 							Computed:    true,
 						},
 						"alert_threshold": schema.Int64Attribute{
-							Description: "Alert threshold percentage.",
+							Description: "Alert threshold in dollars.",
 							Computed:    true,
 						},
 						"periodic_reset": schema.StringAttribute{

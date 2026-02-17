@@ -659,6 +659,10 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 	plan.RateLimits = rlList
 
+	// Note: The Portkey API does not support clearing usage_limits or rate_limits
+	// once set. Removing them from config will cause perpetual plan drift.
+	// Limits can only be removed via the Portkey UI.
+
 	// Handle metadata from API
 	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)

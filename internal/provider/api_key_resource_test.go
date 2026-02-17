@@ -337,6 +337,14 @@ func TestAccAPIKeyResource_withRateLimits(t *testing.T) {
 	})
 }
 
+// TestAccAPIKeyResource_clearUsageLimits is skipped because the Portkey API
+// does not support clearing usage_limits once set. Sending [], null, or omitting
+// the field all preserve existing limits. Limits can only be removed via the
+// Portkey UI. See docs/resources/api_key.md for details.
+func TestAccAPIKeyResource_clearUsageLimits(t *testing.T) {
+	t.Skip("Portkey API does not support clearing usage_limits — limits persist once set")
+}
+
 func testAccAPIKeyResourceConfigWithUsageLimits(name string, creditLimit int, periodicReset string) string {
 	return fmt.Sprintf(`
 resource "portkey_api_key" "test" {

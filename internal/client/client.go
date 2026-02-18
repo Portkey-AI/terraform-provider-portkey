@@ -1822,3 +1822,232 @@ func (c *Client) DeletePromptCollection(ctx context.Context, id string) error {
 	_, err := c.doRequest(ctx, http.MethodDelete, "/collections/"+id, nil)
 	return err
 }
+
+// ============================================================================
+// MCP Integrations
+// ============================================================================
+
+// McpIntegration represents a Portkey MCP integration (org-level MCP server registration)
+type McpIntegration struct {
+	ID                    string `json:"id"`
+	Slug                  string `json:"slug"`
+	Name                  string `json:"name"`
+	Description           string `json:"description,omitempty"`
+	URL                   string `json:"url"`
+	AuthType              string `json:"auth_type"`
+	Transport             string `json:"transport"`
+	Configurations        any    `json:"configurations,omitempty"`
+	WorkspaceID           string `json:"workspace_id,omitempty"`
+	Type                  string `json:"type,omitempty"`
+	Status                string `json:"status,omitempty"`
+	OwnerID               string `json:"owner_id,omitempty"`
+	CreatedAt             string `json:"created_at,omitempty"`
+	LastUpdatedAt         string `json:"last_updated_at,omitempty"`
+	GlobalWorkspaceAccess any    `json:"global_workspace_access,omitempty"`
+}
+
+// CreateMcpIntegrationRequest represents the request to create an MCP integration
+type CreateMcpIntegrationRequest struct {
+	Name           string `json:"name"`
+	Slug           string `json:"slug,omitempty"`
+	Description    string `json:"description,omitempty"`
+	URL            string `json:"url"`
+	AuthType       string `json:"auth_type"`
+	Transport      string `json:"transport"`
+	Configurations any    `json:"configurations,omitempty"`
+	WorkspaceID    string `json:"workspace_id,omitempty"`
+}
+
+// CreateMcpIntegrationResponse represents the response from creating an MCP integration
+type CreateMcpIntegrationResponse struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+}
+
+// UpdateMcpIntegrationRequest represents the request to update an MCP integration
+type UpdateMcpIntegrationRequest struct {
+	Name           string `json:"name,omitempty"`
+	Description    string `json:"description,omitempty"`
+	URL            string `json:"url,omitempty"`
+	AuthType       string `json:"auth_type,omitempty"`
+	Transport      string `json:"transport,omitempty"`
+	Configurations any    `json:"configurations,omitempty"`
+}
+
+// CreateMcpIntegration creates a new MCP integration
+func (c *Client) CreateMcpIntegration(ctx context.Context, req CreateMcpIntegrationRequest) (*CreateMcpIntegrationResponse, error) {
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/mcp-integrations", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response CreateMcpIntegrationResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetMcpIntegration retrieves an MCP integration by ID or slug
+func (c *Client) GetMcpIntegration(ctx context.Context, id string) (*McpIntegration, error) {
+	respBody, err := c.doRequest(ctx, http.MethodGet, "/mcp-integrations/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var integration McpIntegration
+	if err := json.Unmarshal(respBody, &integration); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &integration, nil
+}
+
+// ListMcpIntegrations retrieves all MCP integrations, optionally filtered by workspace
+func (c *Client) ListMcpIntegrations(ctx context.Context, workspaceID string) ([]McpIntegration, error) {
+	path := "/mcp-integrations"
+	if workspaceID != "" {
+		path = fmt.Sprintf("/mcp-integrations?workspace_id=%s", workspaceID)
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Data []McpIntegration `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return response.Data, nil
+}
+
+// UpdateMcpIntegration updates an MCP integration
+func (c *Client) UpdateMcpIntegration(ctx context.Context, id string, req UpdateMcpIntegrationRequest) (*McpIntegration, error) {
+	_, err := c.doRequest(ctx, http.MethodPut, "/mcp-integrations/"+id, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.GetMcpIntegration(ctx, id)
+}
+
+// DeleteMcpIntegration deletes an MCP integration
+func (c *Client) DeleteMcpIntegration(ctx context.Context, id string) error {
+	_, err := c.doRequest(ctx, http.MethodDelete, "/mcp-integrations/"+id, nil)
+	return err
+}
+
+// ============================================================================
+// MCP Capabilities (shared types for integration capabilities)
+// ============================================================================
+
+// McpCapability represents a capability (tool/resource/prompt) in an MCP integration or server
+type McpCapability struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+}
+
+// McpCapabilitiesUpdateRequest represents the request to update capabilities
+type McpCapabilitiesUpdateRequest struct {
+	Capabilities []McpCapability `json:"capabilities"`
+}
+
+// GetMcpIntegrationCapabilities retrieves capabilities for an MCP integration
+func (c *Client) GetMcpIntegrationCapabilities(ctx context.Context, id string) ([]McpCapability, error) {
+	path := fmt.Sprintf("/mcp-integrations/%s/capabilities", id)
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Data []McpCapability `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return response.Data, nil
+}
+
+// UpdateMcpIntegrationCapabilities updates capabilities for an MCP integration
+func (c *Client) UpdateMcpIntegrationCapabilities(ctx context.Context, id string, capabilities []McpCapability) error {
+	path := fmt.Sprintf("/mcp-integrations/%s/capabilities", id)
+	req := McpCapabilitiesUpdateRequest{Capabilities: capabilities}
+	_, err := c.doRequest(ctx, http.MethodPut, path, req)
+	return err
+}
+
+// ============================================================================
+// MCP Integration Workspace Access
+// ============================================================================
+
+// McpIntegrationWorkspace represents workspace access for an MCP integration
+type McpIntegrationWorkspace struct {
+	WorkspaceID string `json:"id"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// McpIntegrationWorkspacesResponse represents the response from listing MCP integration workspaces
+type McpIntegrationWorkspacesResponse struct {
+	Workspaces []McpIntegrationWorkspace `json:"workspaces"`
+}
+
+// McpIntegrationWorkspaceUpdate represents an update to workspace access
+type McpIntegrationWorkspaceUpdate struct {
+	WorkspaceID string `json:"id"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// McpIntegrationWorkspacesUpdateRequest represents the request to update workspace access
+type McpIntegrationWorkspacesUpdateRequest struct {
+	Workspaces []McpIntegrationWorkspaceUpdate `json:"workspaces"`
+}
+
+// GetMcpIntegrationWorkspaces retrieves workspace access for an MCP integration
+func (c *Client) GetMcpIntegrationWorkspaces(ctx context.Context, id string) ([]McpIntegrationWorkspace, error) {
+	path := fmt.Sprintf("/mcp-integrations/%s/workspaces", id)
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response McpIntegrationWorkspacesResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return response.Workspaces, nil
+}
+
+// GetMcpIntegrationWorkspace retrieves a specific workspace's access for an MCP integration
+func (c *Client) GetMcpIntegrationWorkspace(ctx context.Context, id, workspaceID string) (*McpIntegrationWorkspace, error) {
+	workspaces, err := c.GetMcpIntegrationWorkspaces(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ws := range workspaces {
+		if ws.WorkspaceID == workspaceID {
+			return &ws, nil
+		}
+	}
+
+	return nil, fmt.Errorf("workspace %s not found for MCP integration %s", workspaceID, id)
+}
+
+// UpdateMcpIntegrationWorkspace updates a single workspace's access for an MCP integration
+func (c *Client) UpdateMcpIntegrationWorkspace(ctx context.Context, id string, update McpIntegrationWorkspaceUpdate) error {
+	path := fmt.Sprintf("/mcp-integrations/%s/workspaces", id)
+	req := McpIntegrationWorkspacesUpdateRequest{
+		Workspaces: []McpIntegrationWorkspaceUpdate{update},
+	}
+	_, err := c.doRequest(ctx, http.MethodPut, path, req)
+	return err
+}

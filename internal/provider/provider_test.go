@@ -125,6 +125,9 @@ func TestProvider_HasChildResources(t *testing.T) {
 		"portkey_guardrail",
 		"portkey_usage_limits_policy",
 		"portkey_rate_limits_policy",
+		"portkey_mcp_integration",
+		"portkey_mcp_integration_workspace_access",
+		"portkey_mcp_integration_capabilities",
 	}
 
 	resources := New("test")().Resources(context.Background())
@@ -161,6 +164,8 @@ func TestProvider_HasChildDataSources(t *testing.T) {
 		"portkey_usage_limits_policies",
 		"portkey_rate_limits_policy",
 		"portkey_rate_limits_policies",
+		"portkey_mcp_integration",
+		"portkey_mcp_integrations",
 	}
 
 	dataSources := New("test")().DataSources(context.Background())

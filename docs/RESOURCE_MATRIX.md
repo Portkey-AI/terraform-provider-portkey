@@ -10,7 +10,8 @@
 | AI Gateway | 5 | 10 | ✅ All passing |
 | Governance | 3 | 6 | ✅ All passing |
 | Access Control | 1 | 2 | ✅ All passing |
-| **Total** | **12** | **22** | **41/48 passing** |
+| MCP Gateway | 3 | 2 | ✅ All passing (11 tests) |
+| **Total** | **15** | **24** | **All passing** |
 
 ## Provider Resources
 
@@ -28,6 +29,9 @@
 | `portkey_guardrail` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_usage_limits_policy` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_rate_limits_policy` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
+| `portkey_mcp_integration` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD | ✅ Passing |
+| `portkey_mcp_integration_workspace_access` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT wrapping | ✅ Passing |
+| `portkey_mcp_integration_capabilities` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT | ✅ Passing |
 
 ## Data Sources
 
@@ -55,6 +59,8 @@
 | `portkey_usage_limits_policies` | - | ✅ | Working | ✅ Passing |
 | `portkey_rate_limits_policy` | ✅ | - | Working | ✅ Passing |
 | `portkey_rate_limits_policies` | - | ✅ | Working | ✅ Passing |
+| `portkey_mcp_integration` | ✅ | - | Working | ✅ Passing |
+| `portkey_mcp_integrations` | - | ✅ | Working | ✅ Passing |
 
 ## Not Implemented (API Available)
 
@@ -261,6 +267,34 @@ DELETE /configs/{slug}             → Delete
 }
 ```
 *Note: Config field is returned as a JSON string by the API, handled automatically*
+
+### MCP Integrations
+```
+POST   /mcp-integrations                          → Create
+GET    /mcp-integrations                          → List (optional ?workspace_id=xxx)
+GET    /mcp-integrations/{id}                     → Read
+PUT    /mcp-integrations/{id}                     → Update
+DELETE /mcp-integrations/{id}                     → Delete
+GET    /mcp-integrations/{id}/capabilities        → List capabilities
+PUT    /mcp-integrations/{id}/capabilities        → Update capabilities (bulk)
+GET    /mcp-integrations/{id}/workspaces          → List workspace access
+PUT    /mcp-integrations/{id}/workspaces          → Update workspace access (bulk)
+```
+
+**MCP Integration Fields:**
+- `name`: Display name
+- `url`: MCP server URL
+- `auth_type`: `none`, `headers`, `oauth_auto`
+- `transport`: `http` (Streamable HTTP), `sse` (Server-Sent Events)
+- `configurations`: JSON auth config (sensitive)
+- `workspace_id`: Optional workspace scope
+
+**Sub-resource Patterns:**
+- Capabilities and access control use bulk PUT endpoints
+- Single-item operations wrap a single item in the bulk request array
+- Delete operations set `enabled=false` (no real DELETE endpoint)
+
+> **Note:** `portkey_mcp_server` resources are not implemented — the `/mcp-servers` API returns 403 and appears to require additional permissions not available via the Admin API key. MCP integrations + workspace access is sufficient for the primary use case.
 
 ## Known Issues
 

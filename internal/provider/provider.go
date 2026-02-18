@@ -180,6 +180,8 @@ func (p *portkeyProvider) DataSources(_ context.Context) []func() datasource.Dat
 		NewUsageLimitsPoliciesDataSource,
 		NewRateLimitsPolicyDataSource,
 		NewRateLimitsPoliciesDataSource,
+		NewMcpIntegrationDataSource,
+		NewMcpIntegrationsDataSource,
 	}
 }
 
@@ -200,5 +202,8 @@ func (p *portkeyProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewGuardrailResource,
 		NewUsageLimitsPolicyResource,
 		NewRateLimitsPolicyResource,
+		NewMcpIntegrationResource,
+		NewMcpIntegrationWorkspaceAccessResource,
+		NewMcpIntegrationCapabilitiesResource,
 	}
 }

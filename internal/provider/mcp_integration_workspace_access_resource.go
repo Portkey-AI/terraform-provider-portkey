@@ -151,13 +151,16 @@ func (r *mcpIntegrationWorkspaceAccessResource) Read(ctx context.Context, req re
 
 	workspace, err := r.client.GetMcpIntegrationWorkspace(ctx, state.McpIntegrationID.ValueString(), state.WorkspaceID.ValueString())
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "status 404") ||
+			strings.Contains(msg, "404 Not Found") {
 			resp.State.RemoveResource(ctx)
 			return
 		}
 		resp.Diagnostics.AddError(
 			"Error reading MCP integration workspace access",
-			"Could not read workspace access for workspace "+state.WorkspaceID.ValueString()+": "+err.Error(),
+			"Could not read workspace access for workspace "+state.WorkspaceID.ValueString()+": "+msg,
 		)
 		return
 	}
@@ -219,12 +222,15 @@ func (r *mcpIntegrationWorkspaceAccessResource) Delete(ctx context.Context, req 
 	// Check if resource still exists
 	_, err := r.client.GetMcpIntegrationWorkspace(ctx, state.McpIntegrationID.ValueString(), state.WorkspaceID.ValueString())
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "status 404") ||
+			strings.Contains(msg, "404 Not Found") {
 			return
 		}
 		resp.Diagnostics.AddError(
 			"Error deleting MCP integration workspace access",
-			"Could not verify MCP integration workspace access exists: "+err.Error(),
+			"Could not verify MCP integration workspace access exists: "+msg,
 		)
 		return
 	}
@@ -237,12 +243,15 @@ func (r *mcpIntegrationWorkspaceAccessResource) Delete(ctx context.Context, req 
 
 	err = r.client.UpdateMcpIntegrationWorkspace(ctx, state.McpIntegrationID.ValueString(), update)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		msg := err.Error()
+		if strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "status 404") ||
+			strings.Contains(msg, "404 Not Found") {
 			return
 		}
 		resp.Diagnostics.AddError(
 			"Error deleting MCP integration workspace access",
-			"Could not disable MCP integration workspace access: "+err.Error(),
+			"Could not disable MCP integration workspace access: "+msg,
 		)
 		return
 	}

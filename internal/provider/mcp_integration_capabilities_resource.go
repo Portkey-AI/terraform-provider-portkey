@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -18,8 +19,9 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource              = &mcpIntegrationCapabilitiesResource{}
-	_ resource.ResourceWithConfigure = &mcpIntegrationCapabilitiesResource{}
+	_ resource.Resource                = &mcpIntegrationCapabilitiesResource{}
+	_ resource.ResourceWithConfigure   = &mcpIntegrationCapabilitiesResource{}
+	_ resource.ResourceWithImportState = &mcpIntegrationCapabilitiesResource{}
 )
 
 // NewMcpIntegrationCapabilitiesResource is a helper function to simplify the provider implementation.
@@ -235,6 +237,12 @@ func (r *mcpIntegrationCapabilitiesResource) Delete(ctx context.Context, req res
 			return
 		}
 	}
+}
+
+// ImportState imports the resource state.
+func (r *mcpIntegrationCapabilitiesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("mcp_integration_id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 
 // readCapabilities reads capabilities from the API and filters to only those managed in state.

@@ -296,11 +296,11 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	versionUpdateRequired := templateChanged || modelChanged || paramsChanged
 
-	// Warn if version_description changed without content — it only takes effect with new versions
+	// Warn if version_description changed without a version-triggering field change — it only takes effect with new versions
 	if versionDescChanged && !versionUpdateRequired {
 		resp.Diagnostics.AddWarning(
 			"Version Description Change Ignored",
-			"The version_description was changed but content was not. Version descriptions are only applied when a new version is created (i.e., when content changes). The version_description change will be stored in state but not sent to the API.",
+			"The version_description was changed but no version-triggering fields (template, model, or parameters) were modified. Version descriptions are only applied when a new version is created. The version_description change will be stored in state but not sent to the API.",
 		)
 	}
 

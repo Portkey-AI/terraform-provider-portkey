@@ -382,6 +382,9 @@ func (r *promptPartialResource) mapPartialToState(state *promptPartialResourceMo
 		state.PromptPartialVersionID = types.StringValue(partial.PromptPartialVersionID)
 	}
 
+	// Preserve workspace_id from state — the API does not return it in the
+	// PromptPartial response, so we must never overwrite the user-supplied value.
+
 	if partial.VersionDescription != "" {
 		state.VersionDescription = types.StringValue(partial.VersionDescription)
 	}

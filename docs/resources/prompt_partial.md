@@ -28,13 +28,7 @@ resource "portkey_prompt_partial" "system_context" {
   version_description = "Initial version"
 }
 
-# Reference the partial in a prompt using {{>system-context}}
-resource "portkey_prompt" "example" {
-  name         = "Example Prompt"
-  workspace_id = portkey_workspace.example.id
-
-  # The partial can be included via {{>system-context}}
-}
+# Reference the partial in a prompt template via {{>system-context}}
 ```
 
 ## Argument Reference

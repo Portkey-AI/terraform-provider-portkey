@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/joho/godotenv"
+	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
 
 func init() {
@@ -108,6 +110,23 @@ provider "portkey" {}
 // Ensure terraform.State is imported for use in import state functions
 var _ = terraform.State{}
 
+// newTestClient creates a Portkey API client for use in CheckDestroy and other
+// test verification functions. It reads credentials from the same env vars as
+// the provider.
+func newTestClient() (*client.Client, error) {
+	apiKey := os.Getenv("PORTKEY_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("PORTKEY_API_KEY must be set")
+	}
+
+	baseURL := os.Getenv("PORTKEY_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.portkey.ai/v1"
+	}
+
+	return client.NewClient(baseURL, apiKey)
+}
+
 // TestProvider_HasChildResources verifies the provider has resources
 func TestProvider_HasChildResources(t *testing.T) {
 	expectedResources := []string{
@@ -121,6 +140,7 @@ func TestProvider_HasChildResources(t *testing.T) {
 		"portkey_provider",
 		"portkey_config",
 		"portkey_prompt",
+		"portkey_prompt_partial",
 		"portkey_prompt_collection",
 		"portkey_guardrail",
 		"portkey_usage_limits_policy",
@@ -156,6 +176,8 @@ func TestProvider_HasChildDataSources(t *testing.T) {
 		"portkey_configs",
 		"portkey_prompt",
 		"portkey_prompts",
+		"portkey_prompt_partial",
+		"portkey_prompt_partials",
 		"portkey_prompt_collection",
 		"portkey_prompt_collections",
 		"portkey_guardrail",

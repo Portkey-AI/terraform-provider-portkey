@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -110,9 +110,6 @@ func (r *promptResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"prompt_version": schema.Int64Attribute{
 				Description: "Current version number of the prompt.",
 				Computed:    true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
 			},
 			"prompt_version_id": schema.StringAttribute{
 				Description: "Current version ID of the prompt.",
@@ -234,7 +231,8 @@ func (r *promptResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	// Get refreshed prompt value from Portkey (get default version)
+	// Fetch the prompt from the API. Template/Version/VersionID are preserved
+	// from state by mapPromptToState to avoid eventual consistency issues.
 	prompt, err := r.client.GetPrompt(ctx, state.Slug.ValueString(), "")
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -294,8 +292,17 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 	modelChanged := plan.Model.ValueString() != state.Model.ValueString()
 	paramsChanged := plan.Parameters.ValueString() != state.Parameters.ValueString()
 	virtualKeyChanged := plan.VirtualKey.ValueString() != state.VirtualKey.ValueString()
+	versionDescChanged := !plan.VersionDescription.Equal(state.VersionDescription)
 
 	versionUpdateRequired := templateChanged || modelChanged || paramsChanged
+
+	// Warn if version_description changed without a version-triggering field change — it only takes effect with new versions
+	if versionDescChanged && !versionUpdateRequired {
+		resp.Diagnostics.AddWarning(
+			"Version Description Change Ignored",
+			"The version_description was changed but no version-triggering fields (template, model, or parameters) were modified. Version descriptions are only applied when a new version is created. The version_description change will be stored in state but not sent to the API.",
+		)
+	}
 
 	// Build update request
 	updateReq := client.UpdatePromptRequest{}
@@ -333,11 +340,16 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if !plan.VersionDescription.IsNull() && !plan.VersionDescription.IsUnknown() {
 			updateReq.VersionDescription = plan.VersionDescription.ValueString()
 		}
+
+		// virtual_key is required for all version-creating updates
+		updateReq.VirtualKey = plan.VirtualKey.ValueString()
 	}
 
 	// Only call update if there are changes
+	var updateResp *client.UpdatePromptResponse
 	if nameChanged || versionUpdateRequired || virtualKeyChanged {
-		updateResp, err := r.client.UpdatePrompt(ctx, state.Slug.ValueString(), updateReq)
+		var err error
+		updateResp, err = r.client.UpdatePrompt(ctx, state.Slug.ValueString(), updateReq)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Error Updating Portkey Prompt",
@@ -348,18 +360,15 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 		// If a new version was created, make it the default
 		if versionUpdateRequired && updateResp.PromptVersionID != "" {
-			// Get the new version number
-			latestPrompt, err := r.client.GetPrompt(ctx, state.Slug.ValueString(), "latest")
-			if err != nil {
-				resp.Diagnostics.AddError(
-					"Error reading latest prompt version",
-					"Could not read latest prompt version: "+err.Error(),
-				)
-				return
-			}
+			// NOTE: This assumes versions increment by 1. If versions are created
+			// outside Terraform (UI, API, another workspace), the version in state
+			// may be stale, causing this to target the wrong version number.
+			// The Portkey API's makeDefault endpoint requires a version number,
+			// not a version ID, so we cannot use the returned version_id directly.
+			newVersion := int(state.PromptVersion.ValueInt64()) + 1
 
-			// Make the latest version the default
-			err = r.client.MakePromptVersionDefault(ctx, state.Slug.ValueString(), latestPrompt.PromptVersion)
+			// Make the new version the default
+			err = r.client.MakePromptVersionDefault(ctx, state.Slug.ValueString(), newVersion)
 			if err != nil {
 				resp.Diagnostics.AddError(
 					"Error making prompt version default",
@@ -370,18 +379,29 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	// Fetch updated prompt details
-	prompt, err := r.client.GetPrompt(ctx, state.Slug.ValueString(), "")
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error reading prompt after update",
-			"Could not read prompt, unexpected error: "+err.Error(),
-		)
-		return
+	// Set state from plan values to avoid stale API reads due to eventual consistency.
+	// We trust the plan values for fields we sent, and derive computed fields.
+	plan.ID = state.ID
+	plan.Slug = state.Slug
+	plan.CollectionID = state.CollectionID
+
+	// Parameters is Optional+Computed — if user didn't set it, plan value is unknown.
+	// Ensure it's always a known value after apply.
+	if plan.Parameters.IsNull() || plan.Parameters.IsUnknown() {
+		plan.Parameters = state.Parameters
 	}
 
-	// Map response to plan
-	r.mapPromptToState(&plan, prompt)
+	if versionUpdateRequired {
+		plan.PromptVersion = types.Int64Value(state.PromptVersion.ValueInt64() + 1)
+		plan.PromptVersionID = types.StringValue(updateResp.PromptVersionID)
+	} else {
+		plan.PromptVersion = state.PromptVersion
+		plan.PromptVersionID = state.PromptVersionID
+	}
+	plan.PromptVersionStatus = types.StringValue("active")
+	plan.Status = types.StringValue("active")
+	plan.CreatedAt = state.CreatedAt
+	plan.UpdatedAt = types.StringValue(time.Now().UTC().Format("2006-01-02T15:04:05Z07:00"))
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -428,15 +448,24 @@ func (r *promptResource) mapPromptToState(state *promptResourceModel, prompt *cl
 	if state.CollectionID.IsNull() || state.CollectionID.IsUnknown() {
 		state.CollectionID = types.StringValue(prompt.CollectionID)
 	}
-	state.Template = types.StringValue(prompt.String)
-	state.Model = types.StringValue(prompt.Model)
-	// Keep the user-provided virtual_key value (API returns slug but user may have provided ID)
-	// Only update if state is empty
+	// Preserve Template, Model, VirtualKey, PromptVersion, and PromptVersionID
+	// from state when already set. The Portkey API has eventual consistency —
+	// GET may return stale data after updates. We trust Create/Update values.
+	if state.Template.IsNull() || state.Template.IsUnknown() {
+		state.Template = types.StringValue(prompt.String)
+	}
+	if state.Model.IsNull() || state.Model.IsUnknown() {
+		state.Model = types.StringValue(prompt.Model)
+	}
 	if state.VirtualKey.IsNull() || state.VirtualKey.IsUnknown() {
 		state.VirtualKey = types.StringValue(prompt.VirtualKey)
 	}
-	state.PromptVersion = types.Int64Value(int64(prompt.PromptVersion))
-	state.PromptVersionID = types.StringValue(prompt.PromptVersionID)
+	if state.PromptVersion.IsNull() || state.PromptVersion.IsUnknown() {
+		state.PromptVersion = types.Int64Value(int64(prompt.PromptVersion))
+	}
+	if state.PromptVersionID.IsNull() || state.PromptVersionID.IsUnknown() {
+		state.PromptVersionID = types.StringValue(prompt.PromptVersionID)
+	}
 	state.PromptVersionStatus = types.StringValue(prompt.PromptVersionStatus)
 	state.Status = types.StringValue(prompt.Status)
 

@@ -198,8 +198,8 @@ func (r *promptPartialResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	// Fetch the partial from the API. Content/Version/VersionID are preserved
-	// from state by mapPartialToState to avoid eventual consistency issues.
+	// Fetch the partial from the API. mapPartialToState detects external
+	// changes by comparing versions and refreshes content if needed.
 	partial, err := r.client.GetPromptPartial(ctx, state.Slug.ValueString(), "")
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -268,6 +268,7 @@ func (r *promptPartialResource) Update(ctx context.Context, req resource.UpdateR
 
 	// Only call update if there are changes
 	var updateResp *client.UpdatePromptPartialResponse
+	var newVersion int
 	if nameChanged || contentChanged {
 		var err error
 		updateResp, err = r.client.UpdatePromptPartial(ctx, state.Slug.ValueString(), updateReq)
@@ -279,16 +280,36 @@ func (r *promptPartialResource) Update(ctx context.Context, req resource.UpdateR
 			return
 		}
 
-		// If a new version was created (content changed), make it the default
+		// If a new version was created (content changed), make it the default.
+		// Look up the real version number from the versions list by matching
+		// the version ID returned by Update, since the MakeDefault endpoint
+		// requires a version number (not a UUID).
 		if contentChanged && updateResp.PromptPartialVersionID != "" {
-			// NOTE: This assumes versions increment by 1. If versions are created
-			// outside Terraform (UI, API, another workspace), the version in state
-			// may be stale, causing this to target the wrong version number.
-			// The Portkey API's makeDefault endpoint requires a version number,
-			// not a version ID, so we cannot use the returned version_id directly.
-			newVersion := int(state.Version.ValueInt64()) + 1
+			versions, err := r.client.ListPromptPartialVersions(ctx, state.Slug.ValueString())
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error listing prompt partial versions",
+					"Could not list versions to find new version number: "+err.Error(),
+				)
+				return
+			}
 
-			// Make the new version the default
+			newVersion = -1
+			for _, v := range versions {
+				if v.PromptPartialVersionID == updateResp.PromptPartialVersionID {
+					newVersion = v.Version
+					break
+				}
+			}
+
+			if newVersion == -1 {
+				resp.Diagnostics.AddError(
+					"Error finding new prompt partial version",
+					"Could not find version number for version ID "+updateResp.PromptPartialVersionID+" in versions list",
+				)
+				return
+			}
+
 			err = r.client.MakePromptPartialVersionDefault(ctx, state.Slug.ValueString(), newVersion)
 			if err != nil {
 				resp.Diagnostics.AddError(
@@ -304,13 +325,9 @@ func (r *promptPartialResource) Update(ctx context.Context, req resource.UpdateR
 	// We trust the plan values for fields we sent, and derive computed fields.
 	plan.ID = state.ID
 	plan.Slug = state.Slug
-	// plan.Name already has correct value from plan
-	// plan.Content already has correct value from plan
-	// plan.WorkspaceID already has correct value from plan
-	// plan.VersionDescription already has correct value from plan
 
-	if contentChanged {
-		plan.Version = types.Int64Value(state.Version.ValueInt64() + 1)
+	if contentChanged && newVersion > 0 {
+		plan.Version = types.Int64Value(int64(newVersion))
 		plan.PromptPartialVersionID = types.StringValue(updateResp.PromptPartialVersionID)
 	} else {
 		plan.Version = state.Version
@@ -361,33 +378,37 @@ func (r *promptPartialResource) ImportState(ctx context.Context, req resource.Im
 }
 
 // mapPartialToState maps a PromptPartial API response to the Terraform state model.
-// Fields managed by Terraform (Content, Version, PromptPartialVersionID) are preserved
-// from state when already set to avoid eventual consistency issues with the Portkey API.
+// Detects external changes by comparing API version to state version. If the API
+// version is higher, someone edited outside Terraform and we refresh from the API
+// so Terraform can detect the drift and overwrite back to config values.
 func (r *promptPartialResource) mapPartialToState(state *promptPartialResourceModel, partial *client.PromptPartial) {
 	state.ID = types.StringValue(partial.ID)
 	state.Slug = types.StringValue(partial.Slug)
 	state.Name = types.StringValue(partial.Name)
 	state.Status = types.StringValue(partial.Status)
 
-	// Preserve Content, Version, and VersionID from state if already set.
-	// The Portkey API has eventual consistency — GET may return stale data
-	// after updates. We trust the values set during Create/Update.
-	if state.Content.IsNull() || state.Content.IsUnknown() {
+	// Detect external changes: if the API version differs from state, someone
+	// edited outside Terraform (new version or rollback). Refresh from API so
+	// Terraform sees the drift and overwrites back to config values on next apply.
+	externalChange := !state.Version.IsNull() && !state.Version.IsUnknown() &&
+		int64(partial.Version) != state.Version.ValueInt64()
+
+	if externalChange || state.Content.IsNull() || state.Content.IsUnknown() {
 		state.Content = types.StringValue(partial.String)
 	}
-	if state.Version.IsNull() || state.Version.IsUnknown() {
-		state.Version = types.Int64Value(int64(partial.Version))
-	}
-	if state.PromptPartialVersionID.IsNull() || state.PromptPartialVersionID.IsUnknown() {
-		state.PromptPartialVersionID = types.StringValue(partial.PromptPartialVersionID)
-	}
+
+	// Always update version and version ID from API — these are computed fields
+	// that should reflect reality.
+	state.Version = types.Int64Value(int64(partial.Version))
+	state.PromptPartialVersionID = types.StringValue(partial.PromptPartialVersionID)
 
 	// Preserve workspace_id from state — the API does not return it in the
 	// PromptPartial response, so we must never overwrite the user-supplied value.
 
-	if partial.VersionDescription != "" {
-		state.VersionDescription = types.StringValue(partial.VersionDescription)
-	}
+	// Only preserve version_description from state — never import it from the API.
+	// The API may return a version_description set via console edits, but if the
+	// Terraform config doesn't set it, importing it would cause perpetual drift
+	// (state has value, config doesn't, plan always wants to null it out).
 
 	state.CreatedAt = types.StringValue(partial.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	if !partial.UpdatedAt.IsZero() {

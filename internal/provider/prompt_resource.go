@@ -231,8 +231,8 @@ func (r *promptResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	// Fetch the prompt from the API. Template/Version/VersionID are preserved
-	// from state by mapPromptToState to avoid eventual consistency issues.
+	// Fetch the prompt from the API. mapPromptToState detects external
+	// changes by comparing versions and refreshes content if needed.
 	prompt, err := r.client.GetPrompt(ctx, state.Slug.ValueString(), "")
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -347,6 +347,7 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	// Only call update if there are changes
 	var updateResp *client.UpdatePromptResponse
+	var newVersion int
 	if nameChanged || versionUpdateRequired || virtualKeyChanged {
 		var err error
 		updateResp, err = r.client.UpdatePrompt(ctx, state.Slug.ValueString(), updateReq)
@@ -358,16 +359,36 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 			return
 		}
 
-		// If a new version was created, make it the default
+		// If a new version was created, make it the default.
+		// Look up the real version number from the versions list by matching
+		// the version ID returned by Update, since the MakeDefault endpoint
+		// requires a version number (not a UUID).
 		if versionUpdateRequired && updateResp.PromptVersionID != "" {
-			// NOTE: This assumes versions increment by 1. If versions are created
-			// outside Terraform (UI, API, another workspace), the version in state
-			// may be stale, causing this to target the wrong version number.
-			// The Portkey API's makeDefault endpoint requires a version number,
-			// not a version ID, so we cannot use the returned version_id directly.
-			newVersion := int(state.PromptVersion.ValueInt64()) + 1
+			versions, err := r.client.ListPromptVersions(ctx, state.Slug.ValueString())
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error listing prompt versions",
+					"Could not list versions to find new version number: "+err.Error(),
+				)
+				return
+			}
 
-			// Make the new version the default
+			newVersion = -1
+			for _, v := range versions {
+				if v.ID == updateResp.PromptVersionID {
+					newVersion = v.PromptVersion
+					break
+				}
+			}
+
+			if newVersion == -1 {
+				resp.Diagnostics.AddError(
+					"Error finding new prompt version",
+					"Could not find version number for version ID "+updateResp.PromptVersionID+" in versions list",
+				)
+				return
+			}
+
 			err = r.client.MakePromptVersionDefault(ctx, state.Slug.ValueString(), newVersion)
 			if err != nil {
 				resp.Diagnostics.AddError(
@@ -391,8 +412,8 @@ func (r *promptResource) Update(ctx context.Context, req resource.UpdateRequest,
 		plan.Parameters = state.Parameters
 	}
 
-	if versionUpdateRequired {
-		plan.PromptVersion = types.Int64Value(state.PromptVersion.ValueInt64() + 1)
+	if versionUpdateRequired && newVersion > 0 {
+		plan.PromptVersion = types.Int64Value(int64(newVersion))
 		plan.PromptVersionID = types.StringValue(updateResp.PromptVersionID)
 	} else {
 		plan.PromptVersion = state.PromptVersion
@@ -437,9 +458,10 @@ func (r *promptResource) ImportState(ctx context.Context, req resource.ImportSta
 	resource.ImportStatePassthroughID(ctx, path.Root("slug"), req, resp)
 }
 
-// mapPromptToState maps a Prompt API response to the Terraform state model
-// preserveUserValues should be true when we want to keep the user-provided values
-// that may differ from what the API returns (e.g., IDs vs slugs)
+// mapPromptToState maps a Prompt API response to the Terraform state model.
+// Detects external changes by comparing API version to state version. If the API
+// version differs, someone edited outside Terraform and we refresh from the API
+// so Terraform can detect the drift and overwrite back to config values.
 func (r *promptResource) mapPromptToState(state *promptResourceModel, prompt *client.Prompt) {
 	state.ID = types.StringValue(prompt.ID)
 	state.Slug = types.StringValue(prompt.Slug)
@@ -448,29 +470,33 @@ func (r *promptResource) mapPromptToState(state *promptResourceModel, prompt *cl
 	if state.CollectionID.IsNull() || state.CollectionID.IsUnknown() {
 		state.CollectionID = types.StringValue(prompt.CollectionID)
 	}
-	// Preserve Template, Model, VirtualKey, PromptVersion, and PromptVersionID
-	// from state when already set. The Portkey API has eventual consistency —
-	// GET may return stale data after updates. We trust Create/Update values.
-	if state.Template.IsNull() || state.Template.IsUnknown() {
+	// Detect external changes: if the API version differs from state, someone
+	// edited outside Terraform (new version or rollback). Refresh from API so
+	// Terraform sees the drift and overwrites back to config values on next apply.
+	externalChange := !state.PromptVersion.IsNull() && !state.PromptVersion.IsUnknown() &&
+		int64(prompt.PromptVersion) != state.PromptVersion.ValueInt64()
+
+	if externalChange || state.Template.IsNull() || state.Template.IsUnknown() {
 		state.Template = types.StringValue(prompt.String)
 	}
-	if state.Model.IsNull() || state.Model.IsUnknown() {
+	if externalChange || state.Model.IsNull() || state.Model.IsUnknown() {
 		state.Model = types.StringValue(prompt.Model)
 	}
+	// Keep the user-provided virtual_key value (API returns slug but user may have provided ID)
 	if state.VirtualKey.IsNull() || state.VirtualKey.IsUnknown() {
 		state.VirtualKey = types.StringValue(prompt.VirtualKey)
 	}
-	if state.PromptVersion.IsNull() || state.PromptVersion.IsUnknown() {
-		state.PromptVersion = types.Int64Value(int64(prompt.PromptVersion))
-	}
-	if state.PromptVersionID.IsNull() || state.PromptVersionID.IsUnknown() {
-		state.PromptVersionID = types.StringValue(prompt.PromptVersionID)
-	}
+
+	// Always update version and version ID from API — these are computed fields
+	// that should reflect reality.
+	state.PromptVersion = types.Int64Value(int64(prompt.PromptVersion))
+	state.PromptVersionID = types.StringValue(prompt.PromptVersionID)
 	state.PromptVersionStatus = types.StringValue(prompt.PromptVersionStatus)
 	state.Status = types.StringValue(prompt.Status)
 
-	// Keep user's parameters if set - API may add additional fields like "model"
-	if state.Parameters.IsNull() || state.Parameters.IsUnknown() {
+	// Refresh parameters on external change or first population.
+	// Preserved from state otherwise since API may add extra fields like "model".
+	if externalChange || state.Parameters.IsNull() || state.Parameters.IsUnknown() {
 		if prompt.Parameters != nil {
 			paramsBytes, err := json.Marshal(prompt.Parameters)
 			if err == nil {
@@ -481,9 +507,10 @@ func (r *promptResource) mapPromptToState(state *promptResourceModel, prompt *cl
 		}
 	}
 
-	if prompt.PromptVersionDescription != "" {
-		state.VersionDescription = types.StringValue(prompt.PromptVersionDescription)
-	}
+	// Only preserve version_description from state — never import it from the API.
+	// The API may return a version_description set via console edits, but if the
+	// Terraform config doesn't set it, importing it would cause perpetual drift
+	// (state has value, config doesn't, plan always wants to null it out).
 
 	state.CreatedAt = types.StringValue(prompt.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	if !prompt.UpdatedAt.IsZero() {

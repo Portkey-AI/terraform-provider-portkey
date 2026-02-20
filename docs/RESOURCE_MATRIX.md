@@ -17,11 +17,11 @@
 
 | Resource | Create | Read | Update | Delete | Import | API Status | Test Status |
 |----------|:------:|:----:|:------:|:------:|:------:|------------|-------------|
-| `portkey_workspace` | ✅ | ✅ | ✅ | ⚠️ | ✅ | Delete requires name in body | ⚠️ Delete blocked by backend |
+| `portkey_workspace` | ✅ | ✅ | ✅ | ⚠️ | ✅ | Delete requires name in body | ⚠️ 7 tests, delete blocked by backend |
 | `portkey_workspace_member` | ✅ | ⚠️ | ✅ | ✅ | ✅ | getMember API has issues | Skipped |
 | `portkey_user_invite` | ✅ | ✅ | ❌ | ✅ | ✅ | Update API doesn't exist | ✅ Passing |
 | `portkey_integration` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
-| `portkey_api_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
+| `portkey_api_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ 7 tests |
 | `portkey_provider` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_config` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_prompt` | ✅ | ✅ | ⚠️ | ✅ | ✅ | Template updates need versions | ✅ Passing |
@@ -38,14 +38,14 @@
 
 | Data Source | Read | List | API Status | Test Status |
 |-------------|:----:|:----:|------------|-------------|
-| `portkey_workspace` | ✅ | - | Working | Passing |
-| `portkey_workspaces` | - | ✅ | Working | Passing |
+| `portkey_workspace` | ✅ | - | Working | ✅ 3 tests |
+| `portkey_workspaces` | - | ✅ | Working | ✅ 2 tests |
 | `portkey_user` | ✅ | - | Working | Passing |
 | `portkey_users` | - | ✅ | Working | Passing |
 | `portkey_integration` | ✅ | - | Working | ✅ Passing |
 | `portkey_integrations` | - | ✅ | Working | ✅ Passing |
-| `portkey_api_key` | ✅ | - | Working | ✅ Passing |
-| `portkey_api_keys` | - | ✅ | Working | ✅ Passing |
+| `portkey_api_key` | ✅ | - | Working | ✅ 3 tests |
+| `portkey_api_keys` | - | ✅ | Working | ✅ 1 test |
 | `portkey_provider` | ✅ | - | Working | ✅ Passing |
 | `portkey_providers` | - | ✅ | Working | ✅ Passing |
 | `portkey_config` | ✅ | - | Working | ✅ Passing |

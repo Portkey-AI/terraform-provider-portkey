@@ -84,7 +84,7 @@ func (d *integrationWorkspacesDataSource) Schema(_ context.Context, _ datasource
 										Computed:    true,
 									},
 									"alert_threshold": schema.Int64Attribute{
-										Description: "Alert threshold percentage (0-100).",
+										Description: "Alert threshold in dollars.",
 										Computed:    true,
 									},
 									"periodic_reset": schema.StringAttribute{
@@ -169,8 +169,8 @@ func (d *integrationWorkspacesDataSource) Read(ctx context.Context, req datasour
 		AttrTypes: map[string]attr.Type{
 			"id":           types.StringType,
 			"enabled":      types.BoolType,
-			"usage_limits": types.ListType{ElemType: usageLimitsObjectType},
-			"rate_limits":  types.ListType{ElemType: rateLimitsObjectType},
+			"usage_limits": types.ListType{ElemType: workspaceUsageLimitsObjectType},
+			"rate_limits":  types.ListType{ElemType: workspaceRateLimitsObjectType},
 		},
 	}
 
@@ -178,13 +178,13 @@ func (d *integrationWorkspacesDataSource) Read(ctx context.Context, req datasour
 	workspaceAttrs := make([]attr.Value, 0, len(workspacesResp.Workspaces))
 	for _, ws := range workspacesResp.Workspaces {
 		// Use shared helper functions for conversion
-		usageLimitsList, diags := usageLimitsToTerraformList(ws.UsageLimits)
+		usageLimitsList, diags := workspaceUsageLimitsToTerraformList(ws.UsageLimits)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 
-		rateLimitsList, diags := rateLimitsToTerraformList(ws.RateLimits)
+		rateLimitsList, diags := workspaceRateLimitsToTerraformList(ws.RateLimits)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return

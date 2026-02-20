@@ -10,6 +10,8 @@ description: |-
 
 Manages workspace access for a Portkey integration. Enables an integration to be used within a specific workspace, optionally with usage and rate limits.
 
+~> **Note:** Removing `usage_limits` or `rate_limits` from your Terraform config will clear them on the Portkey backend.
+
 ## Example Usage
 
 ### Basic Usage

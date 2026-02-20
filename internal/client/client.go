@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// JSONNull is a pre-encoded JSON null value for clearing fields via the API.
+// Use this with json.RawMessage fields to explicitly send "field": null.
+var JSONNull = json.RawMessage("null")
+
 // Client manages communication with the Portkey Admin API
 type Client struct {
 	BaseURL    string
@@ -81,27 +85,37 @@ type WorkspaceDefaults struct {
 
 // Workspace represents a Portkey workspace
 type Workspace struct {
-	ID          string             `json:"id"`
-	Slug        string             `json:"slug,omitempty"`
-	Name        string             `json:"name"`
-	Description string             `json:"description,omitempty"`
-	Defaults    *WorkspaceDefaults `json:"defaults,omitempty"`
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"last_updated_at"`
+	ID          string                            `json:"id"`
+	Slug        string                            `json:"slug,omitempty"`
+	Name        string                            `json:"name"`
+	Description string                            `json:"description,omitempty"`
+	Defaults    *WorkspaceDefaults                `json:"defaults,omitempty"`
+	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
+	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
+	CreatedAt   time.Time                         `json:"created_at"`
+	UpdatedAt   time.Time                         `json:"last_updated_at"`
 }
 
 // CreateWorkspaceRequest represents the request to create a workspace
 type CreateWorkspaceRequest struct {
-	Name        string             `json:"name"`
-	Description string             `json:"description,omitempty"`
-	Defaults    *WorkspaceDefaults `json:"defaults,omitempty"`
+	Name        string                            `json:"name"`
+	Description string                            `json:"description,omitempty"`
+	Defaults    *WorkspaceDefaults                `json:"defaults,omitempty"`
+	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
+	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
 }
 
-// UpdateWorkspaceRequest represents the request to update a workspace
+// UpdateWorkspaceRequest represents the request to update a workspace.
+// UsageLimits and RateLimits use json.RawMessage for three-state semantics:
+//   - nil: field omitted from JSON (no change to existing limits)
+//   - client.JSONNull: sends "usage_limits": null (clears limits)
+//   - marshaled JSON: sends the new limits array
 type UpdateWorkspaceRequest struct {
 	Name        string             `json:"name,omitempty"`
 	Description string             `json:"description,omitempty"`
 	Defaults    *WorkspaceDefaults `json:"defaults,omitempty"`
+	RateLimits  json.RawMessage    `json:"rate_limits,omitempty"`
+	UsageLimits json.RawMessage    `json:"usage_limits,omitempty"`
 }
 
 // CreateWorkspace creates a new workspace
@@ -610,10 +624,12 @@ type RateLimit struct {
 	Value int    `json:"value"`
 }
 
-// UsageLimits represents usage limit configuration
+// UsageLimits represents usage limit configuration for API keys.
+// Uses the same field names as workspace usage limits (credit_limit, periodic_reset, alert_threshold).
 type UsageLimits struct {
-	CreditsLimit     *float64 `json:"credits_limit,omitempty"`
-	CreditsLimitType string   `json:"credits_limit_type,omitempty"` // per_day, monthly, total
+	CreditLimit    *int   `json:"credit_limit,omitempty"`
+	AlertThreshold *int   `json:"alert_threshold,omitempty"`
+	PeriodicReset  string `json:"periodic_reset,omitempty"` // monthly, weekly
 }
 
 // CreateAPIKeyRequest represents the request to create an API key
@@ -637,12 +653,16 @@ type CreateAPIKeyResponse struct {
 	Object string `json:"object"`
 }
 
-// UpdateAPIKeyRequest represents the request to update an API key
+// UpdateAPIKeyRequest represents the request to update an API key.
+// UsageLimits and RateLimits use json.RawMessage for three-state semantics:
+//   - nil: field omitted from JSON (no change to existing limits)
+//   - client.JSONNull: sends "usage_limits": null (clears limits)
+//   - marshaled JSON: sends the new limits object/array
 type UpdateAPIKeyRequest struct {
 	Name        string          `json:"name,omitempty"`
 	Description string          `json:"description,omitempty"`
-	RateLimits  []RateLimit     `json:"rate_limits,omitempty"`
-	UsageLimits *UsageLimits    `json:"usage_limits,omitempty"`
+	RateLimits  json.RawMessage `json:"rate_limits,omitempty"`
+	UsageLimits json.RawMessage `json:"usage_limits,omitempty"`
 	Scopes      []string        `json:"scopes,omitempty"`
 	Defaults    *APIKeyDefaults `json:"defaults,omitempty"`
 	AlertEmails []string        `json:"alert_emails,omitempty"`

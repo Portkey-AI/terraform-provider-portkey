@@ -32,6 +32,8 @@ type workspaceDataSourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
+	UsageLimits types.List   `tfsdk:"usage_limits"`
+	RateLimits  types.List   `tfsdk:"rate_limits"`
 	Metadata    types.Map    `tfsdk:"metadata"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 	UpdatedAt   types.String `tfsdk:"updated_at"`
@@ -58,6 +60,50 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 			"description": schema.StringAttribute{
 				Description: "Description of the workspace.",
 				Computed:    true,
+			},
+			"usage_limits": schema.ListNestedAttribute{
+				Description: "Usage limits for this workspace.",
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of usage limit.",
+							Computed:    true,
+						},
+						"credit_limit": schema.Int64Attribute{
+							Description: "The credit limit value.",
+							Computed:    true,
+						},
+						"alert_threshold": schema.Int64Attribute{
+							Description: "Alert threshold in dollars.",
+							Computed:    true,
+						},
+						"periodic_reset": schema.StringAttribute{
+							Description: "When to reset the usage.",
+							Computed:    true,
+						},
+					},
+				},
+			},
+			"rate_limits": schema.ListNestedAttribute{
+				Description: "Rate limits for this workspace.",
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of rate limit.",
+							Computed:    true,
+						},
+						"unit": schema.StringAttribute{
+							Description: "Rate limit unit.",
+							Computed:    true,
+						},
+						"value": schema.Int64Attribute{
+							Description: "The rate limit value.",
+							Computed:    true,
+						},
+					},
+				},
 			},
 			"metadata": schema.MapAttribute{
 				Description: "Custom metadata attached to the workspace.",
@@ -119,6 +165,22 @@ func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadReque
 	state.ID = types.StringValue(workspace.ID)
 	state.Name = types.StringValue(workspace.Name)
 	state.Description = types.StringValue(workspace.Description)
+
+	// Handle usage_limits
+	ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.UsageLimits = ulList
+
+	// Handle rate_limits
+	rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.RateLimits = rlList
 
 	// Handle metadata
 	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {

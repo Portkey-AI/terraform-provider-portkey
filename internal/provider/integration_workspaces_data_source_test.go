@@ -125,18 +125,18 @@ resource "portkey_integration_workspace_access" "test" {
   workspace_id   = portkey_workspace.test.id
   enabled        = true
 
-  usage_limits {
+  usage_limits = [{
     type            = "cost"
     credit_limit    = 50
     alert_threshold = 75
     periodic_reset  = "monthly"
-  }
+  }]
 
-  rate_limits {
+  rate_limits = [{
     type  = "requests"
     unit  = "rpm"
     value = 500
-  }
+  }]
 }
 
 data "portkey_integration_workspaces" "test" {

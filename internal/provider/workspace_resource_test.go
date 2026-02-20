@@ -285,12 +285,12 @@ resource "portkey_workspace" "test" {
   name        = %[1]q
   description = "Workspace with usage limits"
 
-  usage_limits {
+  usage_limits = [{
     type            = "cost"
     credit_limit    = %[2]d
     alert_threshold = %[3]d
     periodic_reset  = "monthly"
-  }
+  }]
 }
 `, name, creditLimit, alertThreshold)
 }
@@ -303,11 +303,78 @@ resource "portkey_workspace" "test" {
   name        = %[1]q
   description = "Workspace with rate limits"
 
-  rate_limits {
+  rate_limits = [{
     type  = "requests"
     unit  = "rpm"
     value = 100
-  }
+  }]
 }
 `, name)
+}
+
+func testAccWorkspaceResourceConfigNoLimits(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_workspace" "test" {
+  name        = %[1]q
+  description = "Workspace without limits"
+}
+`, name)
+}
+
+// TestAccWorkspaceResource_clearUsageLimits verifies that removing usage_limits
+// from the Terraform config sends null to the API and clears the limits.
+func TestAccWorkspaceResource_clearUsageLimits(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-wsclear")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with usage_limits
+			{
+				Config: testAccWorkspaceResourceConfigWithUsageLimits(rName, 500, 400),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.#", "1"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.0.credit_limit", "500"),
+				),
+			},
+			// Step 2: Remove usage_limits — should clear them
+			{
+				Config: testAccWorkspaceResourceConfigNoLimits(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_workspace.test", "usage_limits.#", "0"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccWorkspaceResource_clearRateLimits verifies that removing rate_limits
+// from the Terraform config sends null to the API and clears the limits.
+func TestAccWorkspaceResource_clearRateLimits(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-wsrlcl")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with rate_limits
+			{
+				Config: testAccWorkspaceResourceConfigWithRateLimits(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_workspace.test", "rate_limits.#", "1"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "rate_limits.0.type", "requests"),
+				),
+			},
+			// Step 2: Remove rate_limits — should clear them
+			{
+				Config: testAccWorkspaceResourceConfigNoLimits(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_workspace.test", "rate_limits.#", "0"),
+				),
+			},
+		},
+	})
 }

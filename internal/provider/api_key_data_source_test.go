@@ -114,11 +114,11 @@ resource "portkey_api_key" "test" {
   sub_type = "service"
   scopes   = ["providers.list"]
 
-  rate_limits {
+  rate_limits = [{
     type  = "requests"
     unit  = "rpm"
     value = 100
-  }
+  }]
 }
 
 data "portkey_api_key" "test" {

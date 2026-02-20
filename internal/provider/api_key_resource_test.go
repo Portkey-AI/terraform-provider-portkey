@@ -364,6 +364,33 @@ func TestAccAPIKeyResource_clearUsageLimits(t *testing.T) {
 	})
 }
 
+// TestAccAPIKeyResource_clearRateLimits verifies that removing rate_limits
+// from the Terraform config sends null to the API and clears the limits.
+func TestAccAPIKeyResource_clearRateLimits(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-clrl")
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with rate_limits
+			{
+				Config: testAccAPIKeyResourceConfigWithRateLimits(name, "requests", "rpm", 100),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rate_limits.#", "1"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rate_limits.0.type", "requests"),
+				),
+			},
+			// Step 2: Remove rate_limits from config — should clear them
+			{
+				Config: testAccAPIKeyResourceConfigNoLimits(name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("portkey_api_key.test", "rate_limits.0.type"),
+				),
+			},
+		},
+	})
+}
+
 func testAccAPIKeyResourceConfigNoLimits(name string) string {
 	return fmt.Sprintf(`
 resource "portkey_api_key" "test" {
@@ -399,11 +426,11 @@ resource "portkey_api_key" "test" {
   sub_type = "service"
   scopes   = ["providers.list"]
 
-  rate_limits {
+  rate_limits = [{
     type  = %[2]q
     unit  = %[3]q
     value = %[4]d
-  }
+  }]
 }
 `, name, rlType, rlUnit, rlValue)
 }

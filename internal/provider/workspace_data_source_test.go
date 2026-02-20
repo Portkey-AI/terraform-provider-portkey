@@ -98,12 +98,12 @@ resource "portkey_workspace" "test" {
   name        = %[1]q
   description = "Workspace with usage limits for data source test"
 
-  usage_limits {
+  usage_limits = [{
     type            = "cost"
     credit_limit    = 500
     alert_threshold = 400
     periodic_reset  = "monthly"
-  }
+  }]
 }
 
 data "portkey_workspace" "test" {
@@ -120,11 +120,11 @@ resource "portkey_workspace" "test" {
   name        = %[1]q
   description = "Workspace with rate limits for data source test"
 
-  rate_limits {
+  rate_limits = [{
     type  = "requests"
     unit  = "rpm"
     value = 100
-  }
+  }]
 }
 
 data "portkey_workspace" "test" {

@@ -55,12 +55,13 @@ func testAccPromptPartialsDataSourceConfigWithResource(name string) string {
 provider "portkey" {}
 
 resource "portkey_prompt_partial" "test" {
-  name    = %[1]q
-  content = "List data source test content."
+  name         = %[1]q
+  content      = "List data source test content."
+  workspace_id = %[2]q
 }
 
 data "portkey_prompt_partials" "all" {
   depends_on = [portkey_prompt_partial.test]
 }
-`, name)
+`, name, getTestWorkspaceID())
 }

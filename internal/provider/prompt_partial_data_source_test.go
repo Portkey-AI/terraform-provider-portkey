@@ -40,12 +40,13 @@ func testAccPromptPartialDataSourceConfig(name string) string {
 provider "portkey" {}
 
 resource "portkey_prompt_partial" "test" {
-  name    = %[1]q
-  content = "Data source test content."
+  name         = %[1]q
+  content      = "Data source test content."
+  workspace_id = %[2]q
 }
 
 data "portkey_prompt_partial" "test" {
   slug = portkey_prompt_partial.test.slug
 }
-`, name)
+`, name, getTestWorkspaceID())
 }

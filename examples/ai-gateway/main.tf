@@ -19,10 +19,17 @@ variable "openai_api_key" {
   sensitive   = true
 }
 
-# Create a workspace for production
+# Create a workspace for production with budget controls
 resource "portkey_workspace" "production" {
   name        = "Production"
   description = "Production AI Gateway environment"
+
+  usage_limits {
+    type            = "cost"
+    credit_limit    = 1000
+    alert_threshold = 800
+    periodic_reset  = "monthly"
+  }
 }
 
 # Create an integration for OpenAI
@@ -114,7 +121,7 @@ resource "portkey_rate_limits_policy" "api_throttle" {
   ])
 }
 
-# Create a Portkey API key for your backend application
+# Create a Portkey API key for your backend application with budget controls
 resource "portkey_api_key" "backend_service" {
   name         = "Backend Service Key"
   type         = "workspace"
@@ -129,6 +136,14 @@ resource "portkey_api_key" "backend_service" {
     "providers.list",
     "providers.read"
   ]
+
+  usage_limits = {
+    credit_limit    = 500
+    alert_threshold = 400
+    periodic_reset  = "monthly"
+  }
+
+  alert_emails = ["platform-team@example.com"]
 }
 
 # Outputs

@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
@@ -35,6 +38,8 @@ type workspaceResourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
+	UsageLimits types.List   `tfsdk:"usage_limits"`
+	RateLimits  types.List   `tfsdk:"rate_limits"`
 	Metadata    types.Map    `tfsdk:"metadata"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 	UpdatedAt   types.String `tfsdk:"updated_at"`
@@ -65,6 +70,64 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Description: "Description of the workspace.",
 				Optional:    true,
 			},
+			"usage_limits": schema.ListNestedAttribute{
+				Description: "Usage limits for this workspace.",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of usage limit: 'cost' or 'tokens'.",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("cost", "tokens"),
+							},
+						},
+						"credit_limit": schema.Int64Attribute{
+							Description: "The credit limit value.",
+							Optional:    true,
+						},
+						"alert_threshold": schema.Int64Attribute{
+							Description: "Alert threshold in dollars. Triggers email notification when usage reaches this amount.",
+							Optional:    true,
+						},
+						"periodic_reset": schema.StringAttribute{
+							Description: "When to reset the usage: 'monthly' or 'weekly'.",
+							Optional:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("monthly", "weekly"),
+							},
+						},
+					},
+				},
+			},
+			"rate_limits": schema.ListNestedAttribute{
+				Description: "Rate limits for this workspace.",
+				Optional:    true,
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of rate limit: 'requests' or 'tokens'.",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("requests", "tokens"),
+							},
+						},
+						"unit": schema.StringAttribute{
+							Description: "Rate limit unit: 'rpm' (per minute), 'rph' (per hour), or 'rpd' (per day).",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.OneOf("rpm", "rph", "rpd"),
+							},
+						},
+						"value": schema.Int64Attribute{
+							Description: "The rate limit value.",
+							Required:    true,
+						},
+					},
+				},
+			},
 			"metadata": schema.MapAttribute{
 				Description: "Custom metadata to attach to the workspace. This metadata can be used for tracking, observability, and identifying workspaces. All API keys created in this workspace will inherit this metadata by default.",
 				Optional:    true,
@@ -80,9 +143,6 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"updated_at": schema.StringAttribute{
 				Description: "Timestamp when the workspace was last updated.",
 				Computed:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 		},
 	}
@@ -124,6 +184,15 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		Description: plan.Description.ValueString(),
 	}
 
+	// Build limits from plan
+	usageLimits, rateLimits, limitDiags := buildWorkspaceLimitsFromPlan(ctx, &plan)
+	resp.Diagnostics.Append(limitDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	createReq.UsageLimits = usageLimits
+	createReq.RateLimits = rateLimits
+
 	// Handle metadata
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
 		var metadata map[string]string
@@ -150,6 +219,31 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 	plan.ID = types.StringValue(workspace.ID)
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+
+	// Handle usage_limits: trust plan values when user specified them, since
+	// the API has eventual consistency and may not return limits immediately.
+	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() && len(plan.UsageLimits.Elements()) > 0 {
+		// Keep plan values — API response may be stale
+	} else {
+		ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+		resp.Diagnostics.Append(ulDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.UsageLimits = ulList
+	}
+
+	// Handle rate_limits — same approach
+	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() && len(plan.RateLimits.Elements()) > 0 {
+		// Keep plan values
+	} else {
+		rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+		resp.Diagnostics.Append(rlDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.RateLimits = rlList
+	}
 
 	// Handle metadata from API response
 	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
@@ -201,6 +295,22 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 	}
 	// Keep state.Description as-is if it was null and API returns empty
 
+	// Handle usage_limits from API
+	ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.UsageLimits = ulList
+
+	// Handle rate_limits from API
+	rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.RateLimits = rlList
+
 	// Handle metadata from API
 	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, workspace.Defaults.Metadata)
@@ -234,11 +344,30 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	// Read raw config to detect when user removed Optional+Computed attributes.
+	// Plan values for these are Unknown (not Null), so config is the reliable signal.
+	var config workspaceResourceModel
+	diags = req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Update existing workspace
 	updateReq := client.UpdateWorkspaceRequest{
 		Name:        plan.Name.ValueString(),
 		Description: plan.Description.ValueString(),
 	}
+
+	// Build limits as json.RawMessage for three-state semantics (omit/null/value).
+	// Use config (not plan) so IsNull() correctly detects user clearing intent.
+	usageRaw, rateRaw, limitDiags := marshalWorkspaceLimitsForUpdate(ctx, &config)
+	resp.Diagnostics.Append(limitDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	updateReq.UsageLimits = usageRaw
+	updateReq.RateLimits = rateRaw
 
 	// Handle metadata
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
@@ -253,7 +382,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		}
 	}
 
-	_, err := r.client.UpdateWorkspace(ctx, plan.ID.ValueString(), updateReq)
+	workspace, err := r.client.UpdateWorkspace(ctx, plan.ID.ValueString(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Updating Portkey Workspace",
@@ -262,8 +391,49 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	// Note: Don't update timestamps here - the plan already has the expected values
-	// from UseStateForUnknown. Let Read update them on next refresh.
+	// Map response body to schema and populate Computed attribute values
+	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+
+	// Handle usage_limits: if we sent null to clear, trust that (API has
+	// eventual consistency and may return stale data). Otherwise read from API.
+	// Use config (not plan) because Optional+Computed plan values are Unknown,
+	// not Null, when user removes the block.
+	if config.UsageLimits.IsNull() {
+		// We sent null to clear — set state to empty list to match cleared state
+		plan.UsageLimits = types.ListValueMust(workspaceUsageLimitsObjectType, []attr.Value{})
+	} else {
+		ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
+		resp.Diagnostics.Append(ulDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.UsageLimits = ulList
+	}
+
+	// Handle rate_limits — same approach
+	if config.RateLimits.IsNull() {
+		plan.RateLimits = types.ListValueMust(workspaceRateLimitsObjectType, []attr.Value{})
+	} else {
+		rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
+		resp.Diagnostics.Append(rlDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.RateLimits = rlList
+	}
+
+	// Handle metadata from API response
+	if workspace.Defaults != nil && len(workspace.Defaults.Metadata) > 0 {
+		metadataMap, mDiags := types.MapValueFrom(ctx, types.StringType, workspace.Defaults.Metadata)
+		resp.Diagnostics.Append(mDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.Metadata = metadataMap
+	} else if plan.Metadata.IsNull() {
+		plan.Metadata = types.MapNull(types.StringType)
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

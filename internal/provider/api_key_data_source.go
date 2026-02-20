@@ -38,6 +38,8 @@ type apiKeyDataSourceModel struct {
 	UserID         types.String `tfsdk:"user_id"`
 	Status         types.String `tfsdk:"status"`
 	Scopes         types.List   `tfsdk:"scopes"`
+	RateLimits     types.List   `tfsdk:"rate_limits"`
+	UsageLimits    types.Object `tfsdk:"usage_limits"`
 	Metadata       types.Map    `tfsdk:"metadata"`
 	AlertEmails    types.List   `tfsdk:"alert_emails"`
 	CreatedAt      types.String `tfsdk:"created_at"`
@@ -94,6 +96,44 @@ func (d *apiKeyDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 				Description: "List of permission scopes for this API key.",
 				Computed:    true,
 				ElementType: types.StringType,
+			},
+			"usage_limits": schema.SingleNestedAttribute{
+				Description: "Usage limits for this API key.",
+				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"credit_limit": schema.Int64Attribute{
+						Description: "The credit limit value.",
+						Computed:    true,
+					},
+					"alert_threshold": schema.Int64Attribute{
+						Description: "Alert threshold in dollars.",
+						Computed:    true,
+					},
+					"periodic_reset": schema.StringAttribute{
+						Description: "When to reset the usage: 'monthly' or 'weekly'.",
+						Computed:    true,
+					},
+				},
+			},
+			"rate_limits": schema.ListNestedAttribute{
+				Description: "Rate limits for this API key.",
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Description: "Type of rate limit.",
+							Computed:    true,
+						},
+						"unit": schema.StringAttribute{
+							Description: "Rate limit unit.",
+							Computed:    true,
+						},
+						"value": schema.Int64Attribute{
+							Description: "The rate limit value.",
+							Computed:    true,
+						},
+					},
+				},
 			},
 			"metadata": schema.MapAttribute{
 				Description: "Custom metadata attached to the API key.",
@@ -197,6 +237,22 @@ func (d *apiKeyDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	} else {
 		state.Scopes = types.ListNull(types.StringType)
 	}
+
+	// Handle usage_limits
+	ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+	resp.Diagnostics.Append(ulDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.UsageLimits = ulObj
+
+	// Handle rate_limits
+	rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+	resp.Diagnostics.Append(rlDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.RateLimits = rlList
 
 	// Handle metadata
 	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {

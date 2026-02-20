@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-02-20
+
+### Added
+- **Prompt Partials** - New resource and data sources for reusable template fragments:
+  - `portkey_prompt_partial` - Create and manage prompt partials with versioning support
+  - `portkey_prompt_partial` (data source) - Look up a single partial by slug with optional version
+  - `portkey_prompt_partials` (data source) - List all partials, optionally filtered by workspace
+  - Partials can be referenced in prompts via Mustache syntax (`{{>partial-slug}}`)
+- **Usage & Rate Limits** - Added budget controls and rate limiting to workspace and API key resources:
+  - `portkey_workspace` - New `usage_limits` and `rate_limits` attributes for workspace-level controls
+  - `portkey_api_key` - New `usage_limits` and `rate_limits` attributes for key-level controls
+  - All related data sources now return limit configurations
+
+### Fixed
+- **Prompt Resource Eventual Consistency** - Fixed issues where Portkey API returns stale data after mutations:
+  - Template, version, and version_id are now preserved from state during Read
+  - Added `virtual_key` to all version-creating prompt updates (API requirement)
+  - Fixed Parameters field handling for Optional+Computed attributes
+- **Version Description Warning** - Added diagnostic warning when `version_description` changes without content (no-op against API)
+
+### Changed
+- Refactored shared limit conversion helpers into `limits_helpers.go` to eliminate duplication
+
 ## [0.2.11] - 2026-02-04
 
 ### Added
@@ -202,7 +225,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.11...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.8...v0.2.9

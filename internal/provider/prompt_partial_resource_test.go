@@ -63,13 +63,13 @@ func TestAccPromptPartialResource_basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("portkey_prompt_partial.test", "created_at"),
 				),
 			},
-		// ImportState testing
-		{
-			ResourceName:            "portkey_prompt_partial.test",
-			ImportState:             true,
-			ImportStateVerify:       true,
-			ImportStateVerifyIgnore: []string{"created_at", "updated_at", "version_description", "workspace_id"},
-		},
+			// ImportState testing
+			{
+				ResourceName:            "portkey_prompt_partial.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_at", "updated_at", "version_description", "workspace_id"},
+			},
 			// Update name testing (should not bump version)
 			{
 				Config: testAccPromptPartialResourceConfig(rName+"-renamed", "Hello, this is a reusable partial."),

@@ -337,12 +337,42 @@ func TestAccAPIKeyResource_withRateLimits(t *testing.T) {
 	})
 }
 
-// TestAccAPIKeyResource_clearUsageLimits is skipped because the Portkey API
-// does not support clearing usage_limits once set. Sending [], null, or omitting
-// the field all preserve existing limits. Limits can only be removed via the
-// Portkey UI. See docs/resources/api_key.md for details.
+// TestAccAPIKeyResource_clearUsageLimits verifies that removing usage_limits
+// from the Terraform config sends null to the API and clears the limits.
 func TestAccAPIKeyResource_clearUsageLimits(t *testing.T) {
-	t.Skip("Portkey API does not support clearing usage_limits — limits persist once set")
+	name := acctest.RandomWithPrefix("tf-acc-ak-clear")
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with usage_limits
+			{
+				Config: testAccAPIKeyResourceConfigWithUsageLimits(name, 500, "monthly"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credit_limit", "500"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.periodic_reset", "monthly"),
+				),
+			},
+			// Step 2: Remove usage_limits from config — should clear them
+			{
+				Config: testAccAPIKeyResourceConfigNoLimits(name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("portkey_api_key.test", "usage_limits.credit_limit"),
+				),
+			},
+		},
+	})
+}
+
+func testAccAPIKeyResourceConfigNoLimits(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+}
+`, name)
 }
 
 func testAccAPIKeyResourceConfigWithUsageLimits(name string, creditLimit int, periodicReset string) string {

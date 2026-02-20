@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -334,20 +335,30 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	// Read raw config to detect when user removed Optional+Computed attributes.
+	// Plan values for these are Unknown (not Null), so config is the reliable signal.
+	var config workspaceResourceModel
+	diags = req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Update existing workspace
 	updateReq := client.UpdateWorkspaceRequest{
 		Name:        plan.Name.ValueString(),
 		Description: plan.Description.ValueString(),
 	}
 
-	// Build limits from plan
-	usageLimits, rateLimits, limitDiags := buildWorkspaceLimitsFromPlan(ctx, &plan)
+	// Build limits as json.RawMessage for three-state semantics (omit/null/value).
+	// Use config (not plan) so IsNull() correctly detects user clearing intent.
+	usageRaw, rateRaw, limitDiags := marshalWorkspaceLimitsForUpdate(ctx, &config)
 	resp.Diagnostics.Append(limitDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	updateReq.UsageLimits = usageLimits
-	updateReq.RateLimits = rateLimits
+	updateReq.UsageLimits = usageRaw
+	updateReq.RateLimits = rateRaw
 
 	// Handle metadata
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
@@ -375,12 +386,13 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
-	// Handle usage_limits after Update.
-	// If the plan has concrete values, keep them. Otherwise (null or unknown),
-	// read back from the API response. The API may return stale data after
-	// clearing limits, but we must always resolve to a known value.
-	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
-		// Plan has user-specified values — trust them over potentially stale API response
+	// Handle usage_limits: if we sent null to clear, trust that (API has
+	// eventual consistency and may return stale data). Otherwise read from API.
+	// Use config (not plan) because Optional+Computed plan values are Unknown,
+	// not Null, when user removes the block.
+	if config.UsageLimits.IsNull() {
+		// We sent null to clear — set state to empty list to match cleared state
+		plan.UsageLimits = types.ListValueMust(workspaceUsageLimitsObjectType, []attr.Value{})
 	} else {
 		ulList, ulDiags := workspaceUsageLimitsToTerraformList(workspace.UsageLimits)
 		resp.Diagnostics.Append(ulDiags...)
@@ -390,9 +402,9 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		plan.UsageLimits = ulList
 	}
 
-	// Handle rate_limits after Update — same approach
-	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
-		// Plan has user-specified values — trust them
+	// Handle rate_limits — same approach
+	if config.RateLimits.IsNull() {
+		plan.RateLimits = types.ListValueMust(workspaceRateLimitsObjectType, []attr.Value{})
 	} else {
 		rlList, rlDiags := workspaceRateLimitsToTerraformList(workspace.RateLimits)
 		resp.Diagnostics.Append(rlDiags...)

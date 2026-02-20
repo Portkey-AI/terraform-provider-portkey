@@ -559,6 +559,15 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
+	// Read raw config to detect when user removed Optional+Computed attributes.
+	// Plan values for these are Unknown (not Null), so config is the reliable signal.
+	var config apiKeyResourceModel
+	diags = req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Build update request
 	updateReq := client.UpdateAPIKeyRequest{
 		Name: plan.Name.ValueString(),
@@ -593,15 +602,12 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.Defaults.Metadata = metadata
 	}
 
-	// Handle usage_limits
-	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
-		updateReq.UsageLimits = terraformToAPIKeyUsageLimits(plan.UsageLimits)
-	}
+	// Handle usage_limits: use config (not plan) to detect user intent.
+	// Config is null when user removed the block; plan would be Unknown.
+	updateReq.UsageLimits = marshalAPIKeyUsageLimitsForUpdate(config.UsageLimits)
 
-	// Handle rate_limits
-	if !plan.RateLimits.IsNull() && !plan.RateLimits.IsUnknown() {
-		updateReq.RateLimits = terraformToAPIKeyRateLimits(plan.RateLimits)
-	}
+	// Handle rate_limits — same approach
+	updateReq.RateLimits = marshalAPIKeyRateLimitsForUpdate(config.RateLimits)
 
 	// Handle alert_emails
 	if !plan.AlertEmails.IsNull() && !plan.AlertEmails.IsUnknown() {
@@ -643,25 +649,32 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		plan.Scopes = scopesList
 	}
 
-	// Handle usage_limits from API
-	ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
-	resp.Diagnostics.Append(ulDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Handle usage_limits: if we sent null to clear, trust that (API has
+	// eventual consistency and may return stale data). Otherwise read from API.
+	// Use config (not plan) because Optional+Computed plan values are Unknown,
+	// not Null, when user removes the block.
+	if config.UsageLimits.IsNull() {
+		plan.UsageLimits = types.ObjectNull(apiKeyUsageLimitsAttrTypes)
+	} else {
+		ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+		resp.Diagnostics.Append(ulDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.UsageLimits = ulObj
 	}
-	plan.UsageLimits = ulObj
 
-	// Handle rate_limits from API
-	rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
-	resp.Diagnostics.Append(rlDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Handle rate_limits — same approach
+	if config.RateLimits.IsNull() {
+		plan.RateLimits = types.ListNull(apiKeyRateLimitsObjectType)
+	} else {
+		rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+		resp.Diagnostics.Append(rlDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.RateLimits = rlList
 	}
-	plan.RateLimits = rlList
-
-	// Note: The Portkey API does not support clearing usage_limits or rate_limits
-	// once set. Removing them from config will cause perpetual plan drift.
-	// Limits can only be removed via the Portkey UI.
 
 	// Handle metadata from API
 	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {

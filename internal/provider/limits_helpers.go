@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -175,6 +176,125 @@ func workspaceRateLimitsToTerraformList(limits []client.IntegrationWorkspaceRate
 	list, d := types.ListValue(workspaceRateLimitsObjectType, rateLimitsAttrs)
 	diags.Append(d...)
 	return list, diags
+}
+
+// ============================================================================
+// json.RawMessage helpers for Update requests (three-state: omit/null/value)
+// ============================================================================
+
+// marshalWorkspaceLimitsForUpdate converts workspace limits from a plan into
+// json.RawMessage values suitable for UpdateWorkspaceRequest.
+// Returns (nil, nil) to omit both fields (no change), client.JSONNull to clear,
+// or the marshaled JSON array to set new limits.
+func marshalWorkspaceLimitsForUpdate(ctx context.Context, plan *workspaceResourceModel) (json.RawMessage, json.RawMessage, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var usageRaw, rateRaw json.RawMessage
+
+	// Handle usage_limits
+	if plan.UsageLimits.IsNull() {
+		// User removed usage_limits block: send null to clear
+		usageRaw = client.JSONNull
+	} else if !plan.UsageLimits.IsUnknown() {
+		var ulModels []workspaceUsageLimitsModel
+		diags.Append(plan.UsageLimits.ElementsAs(ctx, &ulModels, false)...)
+		if diags.HasError() {
+			return nil, nil, diags
+		}
+		var limits []client.IntegrationWorkspaceUsageLimits
+		for _, ul := range ulModels {
+			clientUL := client.IntegrationWorkspaceUsageLimits{
+				Type:          ul.Type.ValueString(),
+				PeriodicReset: ul.PeriodicReset.ValueString(),
+			}
+			if !ul.CreditLimit.IsNull() {
+				v := int(ul.CreditLimit.ValueInt64())
+				clientUL.CreditLimit = &v
+			}
+			if !ul.AlertThreshold.IsNull() {
+				v := int(ul.AlertThreshold.ValueInt64())
+				clientUL.AlertThreshold = &v
+			}
+			limits = append(limits, clientUL)
+		}
+		data, err := json.Marshal(limits)
+		if err != nil {
+			diags.AddError("Error marshaling usage_limits", err.Error())
+			return nil, nil, diags
+		}
+		usageRaw = data
+	}
+	// else: unknown → usageRaw stays nil → omitted from JSON
+
+	// Handle rate_limits
+	if plan.RateLimits.IsNull() {
+		rateRaw = client.JSONNull
+	} else if !plan.RateLimits.IsUnknown() {
+		var rlModels []workspaceRateLimitsModel
+		diags.Append(plan.RateLimits.ElementsAs(ctx, &rlModels, false)...)
+		if diags.HasError() {
+			return nil, nil, diags
+		}
+		var limits []client.IntegrationWorkspaceRateLimits
+		for _, rl := range rlModels {
+			clientRL := client.IntegrationWorkspaceRateLimits{
+				Type: rl.Type.ValueString(),
+				Unit: rl.Unit.ValueString(),
+			}
+			if !rl.Value.IsNull() {
+				v := int(rl.Value.ValueInt64())
+				clientRL.Value = &v
+			}
+			limits = append(limits, clientRL)
+		}
+		data, err := json.Marshal(limits)
+		if err != nil {
+			diags.AddError("Error marshaling rate_limits", err.Error())
+			return nil, nil, diags
+		}
+		rateRaw = data
+	}
+
+	return usageRaw, rateRaw, diags
+}
+
+// marshalAPIKeyUsageLimitsForUpdate converts API key usage_limits from a plan
+// into a json.RawMessage for UpdateAPIKeyRequest.
+func marshalAPIKeyUsageLimitsForUpdate(obj types.Object) json.RawMessage {
+	if obj.IsNull() {
+		return client.JSONNull
+	}
+	if obj.IsUnknown() {
+		return nil
+	}
+	ul := terraformToAPIKeyUsageLimits(obj)
+	if ul == nil {
+		return client.JSONNull
+	}
+	data, err := json.Marshal(ul)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// marshalAPIKeyRateLimitsForUpdate converts API key rate_limits from a plan
+// into a json.RawMessage for UpdateAPIKeyRequest.
+func marshalAPIKeyRateLimitsForUpdate(list types.List) json.RawMessage {
+	if list.IsNull() {
+		return client.JSONNull
+	}
+	if list.IsUnknown() {
+		return nil
+	}
+	rl := terraformToAPIKeyRateLimits(list)
+	if rl == nil {
+		return client.JSONNull
+	}
+	data, err := json.Marshal(rl)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // ============================================================================

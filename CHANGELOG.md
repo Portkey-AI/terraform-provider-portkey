@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-02-22
+
+### Fixed
+- **Prompt & Prompt Partial Drift Detection** - Fixed issues where external changes made in the Portkey console were invisible to Terraform:
+  - Now detects when someone edits a prompt or partial outside Terraform (new versions or rollbacks)
+  - Terraform will show the drift and overwrite back to config values on next apply
+- **Version Description Perpetual Drift** - Fixed infinite plan loop when `version_description` was set via console but not in Terraform config
+- **MakeDefault Version Lookup** - Fixed incorrect version targeting when versions are created outside Terraform (e.g., console edits creating gaps in version sequence). Now uses version list API to find the correct version number instead of assuming `+1` increment
+
 ## [0.2.12] - 2026-02-20
 
 ### Added
@@ -225,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.9...v0.2.10

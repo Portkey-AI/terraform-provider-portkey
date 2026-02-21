@@ -1176,6 +1176,29 @@ func (c *Client) UpdatePrompt(ctx context.Context, slugOrID string, req UpdatePr
 	return &response, nil
 }
 
+// PromptVersionListEntry represents a single version in the versions list response.
+type PromptVersionListEntry struct {
+	ID            string `json:"id"` // prompt_version_id
+	PromptVersion int    `json:"prompt_version"`
+}
+
+// ListPromptVersions lists all versions of a prompt, sorted newest-first.
+func (c *Client) ListPromptVersions(ctx context.Context, slugOrID string) ([]PromptVersionListEntry, error) {
+	respBody, err := c.doRequest(ctx, http.MethodGet, "/prompts/"+slugOrID+"/versions", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Data []PromptVersionListEntry `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling versions response: %w", err)
+	}
+
+	return response.Data, nil
+}
+
 // MakePromptVersionDefault makes a specific version the default
 func (c *Client) MakePromptVersionDefault(ctx context.Context, slugOrID string, version int) error {
 	req := map[string]int{"version": version}
@@ -1305,6 +1328,29 @@ func (c *Client) UpdatePromptPartial(ctx context.Context, slugOrID string, req U
 	}
 
 	return &response, nil
+}
+
+// PromptPartialVersionListEntry represents a single version in the versions list response.
+type PromptPartialVersionListEntry struct {
+	PromptPartialVersionID string `json:"prompt_partial_version_id"`
+	Version                int    `json:"version"`
+}
+
+// ListPromptPartialVersions lists all versions of a prompt partial, sorted newest-first.
+func (c *Client) ListPromptPartialVersions(ctx context.Context, slugOrID string) ([]PromptPartialVersionListEntry, error) {
+	respBody, err := c.doRequest(ctx, http.MethodGet, "/prompts/partials/"+slugOrID+"/versions", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Data []PromptPartialVersionListEntry `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling versions response: %w", err)
+	}
+
+	return response.Data, nil
 }
 
 // MakePromptPartialVersionDefault makes a specific version the default

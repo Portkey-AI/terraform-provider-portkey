@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-02-27
+
+### Added
+- **Workspace-Scoped Integrations** - `portkey_integration` now supports workspace-level scoping:
+  - `workspace_id` - Optional attribute to scope an integration to a specific workspace
+  - `type` - Computed attribute showing "organisation" or "workspace" level
+  - Organisation-level integrations are accessible across all workspaces
+  - Workspace-level integrations are only accessible within the specified workspace
+
 ## [0.2.13] - 2026-02-22
 
 ### Fixed
@@ -234,7 +243,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...HEAD
+[0.2.14]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.10...v0.2.11

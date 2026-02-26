@@ -606,3 +606,38 @@ resource "portkey_integration" "test" {
 }
 `, name, key)
 }
+
+func TestAccIntegrationResource_workspaceScoped(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-test")
+	workspaceID := testAccGetEnvOrSkip(t, "TEST_WORKSPACE_ID")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithWorkspace(rName, workspaceID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "openai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "type", "workspace"),
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "workspace_id"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithWorkspace(name, workspaceID string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "openai"
+  key            = "sk-test-placeholder"
+  workspace_id   = %[2]q
+}
+`, name, workspaceID)
+}

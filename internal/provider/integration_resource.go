@@ -43,6 +43,8 @@ type integrationResourceModel struct {
 	KeyVersion     types.Int64  `tfsdk:"key_version"`
 	Configurations types.String `tfsdk:"configurations"`
 	Description    types.String `tfsdk:"description"`
+	WorkspaceID    types.String `tfsdk:"workspace_id"`
+	Type           types.String `tfsdk:"type"`
 	Status         types.String `tfsdk:"status"`
 	CreatedAt      types.String `tfsdk:"created_at"`
 	UpdatedAt      types.String `tfsdk:"updated_at"`
@@ -107,6 +109,22 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"description": schema.StringAttribute{
 				Description: "Optional description of the integration.",
 				Optional:    true,
+			},
+			"workspace_id": schema.StringAttribute{
+				Description: "Workspace ID to scope this integration to. When set, creates a workspace-level integration that is only accessible within that workspace. When not set (and using an organisation API key), creates an organisation-level integration. If using a workspace-scoped API key, the integration is automatically scoped to that workspace.",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"type": schema.StringAttribute{
+				Description: "Type of integration: 'organisation' for org-level integrations or 'workspace' for workspace-scoped integrations.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"status": schema.StringAttribute{
 				Description: "Status of the integration (active, archived).",
@@ -222,6 +240,10 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		createReq.Description = plan.Description.ValueString()
 	}
 
+	if !plan.WorkspaceID.IsNull() && !plan.WorkspaceID.IsUnknown() {
+		createReq.WorkspaceID = plan.WorkspaceID.ValueString()
+	}
+
 	createResp, err := r.client.CreateIntegration(ctx, createReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -250,6 +272,21 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		plan.UpdatedAt = types.StringValue(integration.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	} else {
 		plan.UpdatedAt = types.StringValue(integration.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	}
+
+	// Set type from API response
+	if integration.Type != "" {
+		plan.Type = types.StringValue(integration.Type)
+	}
+
+	// Preserve user-provided workspace_id (API may return slug format instead of UUID)
+	// Only update from API if user didn't provide workspace_id
+	if plan.WorkspaceID.IsNull() || plan.WorkspaceID.IsUnknown() {
+		if integration.WorkspaceID != "" {
+			plan.WorkspaceID = types.StringValue(integration.WorkspaceID)
+		} else {
+			plan.WorkspaceID = types.StringNull()
+		}
 	}
 
 	// Set state to fully populated data
@@ -298,6 +335,21 @@ func (r *integrationResource) Read(ctx context.Context, req resource.ReadRequest
 	state.CreatedAt = types.StringValue(integration.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	if !integration.UpdatedAt.IsZero() {
 		state.UpdatedAt = types.StringValue(integration.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	}
+
+	// Set type from API response
+	if integration.Type != "" {
+		state.Type = types.StringValue(integration.Type)
+	}
+
+	// Preserve user-provided workspace_id from state (API may return slug format instead of UUID)
+	// Only update from API if not already set in state
+	if state.WorkspaceID.IsNull() || state.WorkspaceID.IsUnknown() {
+		if integration.WorkspaceID != "" {
+			state.WorkspaceID = types.StringValue(integration.WorkspaceID)
+		} else {
+			state.WorkspaceID = types.StringNull()
+		}
 	}
 
 	// Set refreshed state
@@ -420,6 +472,14 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 	if !integration.UpdatedAt.IsZero() {
 		plan.UpdatedAt = types.StringValue(integration.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	}
+
+	// Set type from API response
+	if integration.Type != "" {
+		plan.Type = types.StringValue(integration.Type)
+	}
+
+	// Preserve workspace_id from state (workspace_id is immutable, RequiresReplace)
+	plan.WorkspaceID = state.WorkspaceID
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

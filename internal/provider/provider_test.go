@@ -102,6 +102,15 @@ func getTestVirtualKey() string {
 	return ""
 }
 
+// testAccGetEnvOrSkip returns the value of an environment variable or skips the test if not set
+func testAccGetEnvOrSkip(t *testing.T, envVar string) string {
+	if v := os.Getenv(envVar); v != "" {
+		return v
+	}
+	t.Skipf("%s must be set for this test", envVar)
+	return ""
+}
+
 // providerConfig is a shared configuration for all acceptance tests.
 const providerConfig = `
 provider "portkey" {}

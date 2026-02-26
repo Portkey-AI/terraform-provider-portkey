@@ -498,6 +498,8 @@ type Integration struct {
 	Configurations map[string]interface{} `json:"configurations,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"last_updated_at"`
+	Type           string                 `json:"type,omitempty"`
+	WorkspaceID    string                 `json:"workspace_id,omitempty"`
 }
 
 // CreateIntegrationRequest represents the request to create an integration
@@ -508,6 +510,7 @@ type CreateIntegrationRequest struct {
 	Key            string                 `json:"key,omitempty"`
 	Description    string                 `json:"description,omitempty"`
 	Configurations map[string]interface{} `json:"configurations,omitempty"`
+	WorkspaceID    string                 `json:"workspace_id,omitempty"`
 }
 
 // UpdateIntegrationRequest represents the request to update an integration

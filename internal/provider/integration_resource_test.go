@@ -26,6 +26,7 @@ func TestAccIntegrationResource_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "openai"),
 					resource.TestCheckResourceAttr("portkey_integration.test", "description", "Initial description"),
 					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "allow_all_models", "true"),
 					resource.TestCheckResourceAttrSet("portkey_integration.test", "created_at"),
 				),
 			},
@@ -605,6 +606,71 @@ resource "portkey_integration" "test" {
   key_wo         = %[2]q
 }
 `, name, key)
+}
+
+func TestAccIntegrationResource_allowAllModelsFalse(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-no-models")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with allow_all_models = false
+			{
+				Config: testAccIntegrationResourceConfigAllowAllModels(rName, false),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "allow_all_models", "false"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccIntegrationResource_allowAllModelsUpdate(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-models-update")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with allow_all_models = true (default)
+			{
+				Config: testAccIntegrationResourceConfigAllowAllModels(rName, true),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_integration.test", "allow_all_models", "true"),
+				),
+			},
+			// Update to allow_all_models = false
+			{
+				Config: testAccIntegrationResourceConfigAllowAllModels(rName, false),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_integration.test", "allow_all_models", "false"),
+				),
+			},
+			// Update back to allow_all_models = true
+			{
+				Config: testAccIntegrationResourceConfigAllowAllModels(rName, true),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_integration.test", "allow_all_models", "true"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigAllowAllModels(name string, allowAllModels bool) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name             = %[1]q
+  ai_provider_id   = "openai"
+  key              = "sk-test-fake-key-12345"
+  allow_all_models = %[2]t
+}
+`, name, allowAllModels)
 }
 
 func TestAccIntegrationResource_workspaceScoped(t *testing.T) {

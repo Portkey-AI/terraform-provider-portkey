@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-03-06
+
 ### Added
 - **Integration Model Access Control** - `portkey_integration` now supports `allow_all_models` attribute:
   - Defaults to `true` (all models available, matching API behavior)
@@ -248,7 +250,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...HEAD
+[0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.11...v0.2.12

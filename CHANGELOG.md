@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Integration Model Access Control** - `portkey_integration` now supports `allow_all_models` attribute:
+  - Defaults to `true` (all models available, matching API behavior)
+  - Set to `false` to restrict access to only models explicitly enabled via `portkey_integration_model_access` resources
+
 ## [0.2.14] - 2026-02-27
 
 ### Added

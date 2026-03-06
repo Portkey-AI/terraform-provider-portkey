@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -44,6 +45,7 @@ type integrationResourceModel struct {
 	Configurations types.String `tfsdk:"configurations"`
 	Description    types.String `tfsdk:"description"`
 	WorkspaceID    types.String `tfsdk:"workspace_id"`
+	AllowAllModels types.Bool   `tfsdk:"allow_all_models"`
 	Type           types.String `tfsdk:"type"`
 	Status         types.String `tfsdk:"status"`
 	CreatedAt      types.String `tfsdk:"created_at"`
@@ -118,6 +120,12 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
+			},
+			"allow_all_models": schema.BoolAttribute{
+				Description: "Whether all models are enabled by default for this integration. When true (the default), all models for the provider are available. Set to false to restrict access to only models explicitly enabled via portkey_integration_model_access resources.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(true),
 			},
 			"type": schema.StringAttribute{
 				Description: "Type of integration: 'organisation' for org-level integrations or 'workspace' for workspace-scoped integrations.",
@@ -263,7 +271,9 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	// Map response body to schema
+	// Map response body to schema and set partial state BEFORE the models call.
+	// This ensures that if UpdateIntegrationModels fails, Terraform still tracks
+	// the created integration and can reconcile on the next plan/apply.
 	plan.ID = types.StringValue(integration.ID)
 	plan.Slug = types.StringValue(integration.Slug)
 	plan.Status = types.StringValue(integration.Status)
@@ -287,6 +297,36 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		} else {
 			plan.WorkspaceID = types.StringNull()
 		}
+	}
+
+	// Only call UpdateIntegrationModels when allow_all_models is false,
+	// since the API already defaults to true.
+	if !plan.AllowAllModels.ValueBool() {
+		allowAll := plan.AllowAllModels.ValueBool()
+		modelsReq := client.BulkUpdateModelsRequest{
+			AllowAllModels: &allowAll,
+			Models:         []client.IntegrationModel{},
+		}
+		err = r.client.UpdateIntegrationModels(ctx, createResp.Slug, modelsReq)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error setting allow_all_models",
+				"Could not update allow_all_models for integration: "+err.Error(),
+			)
+			// State is set below so Terraform tracks the integration even on failure
+		}
+	}
+
+	// Read allow_all_models from the models endpoint to get the actual API value
+	modelsResp, err := r.client.GetIntegrationModels(ctx, integration.Slug)
+	if err != nil {
+		// If we can't read models, use the plan value so state is still saved
+		resp.Diagnostics.AddWarning(
+			"Error reading integration models after creation",
+			"Could not read integration models, using plan value: "+err.Error(),
+		)
+	} else {
+		plan.AllowAllModels = types.BoolValue(modelsResp.AllowAllModels)
 	}
 
 	// Set state to fully populated data
@@ -351,6 +391,17 @@ func (r *integrationResource) Read(ctx context.Context, req resource.ReadRequest
 			state.WorkspaceID = types.StringNull()
 		}
 	}
+
+	// Read allow_all_models from the models endpoint
+	modelsResp, err := r.client.GetIntegrationModels(ctx, state.Slug.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error reading integration models",
+			"Could not read integration models: "+err.Error(),
+		)
+		return
+	}
+	state.AllowAllModels = types.BoolValue(modelsResp.AllowAllModels)
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
@@ -464,6 +515,23 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	// Update allow_all_models if it changed
+	if !plan.AllowAllModels.Equal(state.AllowAllModels) {
+		allowAll := plan.AllowAllModels.ValueBool()
+		modelsReq := client.BulkUpdateModelsRequest{
+			AllowAllModels: &allowAll,
+			Models:         []client.IntegrationModel{},
+		}
+		err = r.client.UpdateIntegrationModels(ctx, state.Slug.ValueString(), modelsReq)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error updating allow_all_models",
+				"Could not update allow_all_models for integration: "+err.Error(),
+			)
+			return
+		}
+	}
+
 	// Update resource state with updated items and timestamp
 	plan.ID = types.StringValue(integration.ID)
 	plan.Slug = types.StringValue(integration.Slug)
@@ -480,6 +548,17 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 
 	// Preserve workspace_id from state (workspace_id is immutable, RequiresReplace)
 	plan.WorkspaceID = state.WorkspaceID
+
+	// Read allow_all_models from the models endpoint
+	modelsResp, err := r.client.GetIntegrationModels(ctx, integration.Slug)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error reading integration models after update",
+			"Could not read integration models: "+err.Error(),
+		)
+		return
+	}
+	plan.AllowAllModels = types.BoolValue(modelsResp.AllowAllModels)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

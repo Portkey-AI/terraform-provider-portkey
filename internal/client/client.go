@@ -1791,9 +1791,27 @@ func (c *Client) GetIntegrationWorkspace(ctx context.Context, integrationSlug, w
 		return nil, err
 	}
 
+	// First try direct match (handles cases where workspaceID is already a slug)
 	for _, ws := range workspaces.Workspaces {
 		if ws.ID == workspaceID {
 			return &ws, nil
+		}
+	}
+
+	// If no direct match and workspaceID looks like a UUID, try to get workspace slug
+	// UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with dashes)
+	if len(workspaceID) == 36 && strings.Count(workspaceID, "-") == 4 {
+		workspace, err := c.GetWorkspace(ctx, workspaceID)
+		if err != nil {
+			// If we can't get workspace details, fall back to original error
+			return nil, fmt.Errorf("workspace %s not found for integration %s", workspaceID, integrationSlug)
+		}
+
+		// Search again using the workspace slug
+		for _, ws := range workspaces.Workspaces {
+			if ws.ID == workspace.Slug {
+				return &ws, nil
+			}
 		}
 	}
 

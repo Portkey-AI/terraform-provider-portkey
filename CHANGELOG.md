@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-03-13
+
+### Fixed
+- **Integration Workspace Access UUID/Slug Resolution** - Fixed `portkey_integration_workspace_access` read-after-create failures when `workspace_id` is a UUID but integration workspace APIs return workspace slugs. `GetIntegrationWorkspace()` now resolves UUID input to slug before lookup.
+
 ## [0.2.15] - 2026-03-06
 
 ### Added
@@ -250,7 +255,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...HEAD
+[0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...v0.2.13

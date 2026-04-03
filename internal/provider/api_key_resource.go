@@ -48,10 +48,12 @@ type apiKeyResourceModel struct {
 	Scopes         types.List   `tfsdk:"scopes"`
 	RateLimits     types.List   `tfsdk:"rate_limits"`
 	UsageLimits    types.Object `tfsdk:"usage_limits"`
-	Metadata       types.Map    `tfsdk:"metadata"`
-	AlertEmails    types.List   `tfsdk:"alert_emails"`
-	CreatedAt      types.String `tfsdk:"created_at"`
-	UpdatedAt      types.String `tfsdk:"updated_at"`
+	Metadata            types.Map    `tfsdk:"metadata"`
+	AlertEmails         types.List   `tfsdk:"alert_emails"`
+	ConfigID            types.String `tfsdk:"config_id"`
+	AllowConfigOverride types.Bool   `tfsdk:"allow_config_override"`
+	CreatedAt           types.String `tfsdk:"created_at"`
+	UpdatedAt           types.String `tfsdk:"updated_at"`
 }
 
 // Metadata returns the resource type name.
@@ -193,6 +195,21 @@ API Key Types:
 				Optional:    true,
 				ElementType: types.StringType,
 			},
+			"config_id": schema.StringAttribute{
+				Description: "ID of the Portkey config to bind as the default config for all requests made using this API key. " +
+					"When set, every request using this key will apply this config by default. " +
+					"Optional. Once set, clearing this field in Terraform will not remove the binding from the API — use the Portkey API directly to unset it.",
+				Optional: true,
+				Computed: true,
+			},
+			"allow_config_override": schema.BoolAttribute{
+				Description: "Controls whether callers using this API key can override the bound config_id at request time. " +
+					"Only meaningful when config_id is set. " +
+					"Set to false (default) to lock callers to the bound config; set to true to allow per-request config overrides. " +
+					"Optional. Once set, clearing this field in Terraform will not remove it from the API — use the Portkey API directly to unset it.",
+				Optional: true,
+				Computed: true,
+			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the API key was created.",
 				Computed:    true,
@@ -255,6 +272,19 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	// Validate: allow_config_override = true is only meaningful when config_id is also set.
+	// Setting it without a bound config is a configuration mistake.
+	if !plan.AllowConfigOverride.IsNull() && !plan.AllowConfigOverride.IsUnknown() &&
+		plan.AllowConfigOverride.ValueBool() &&
+		(plan.ConfigID.IsNull() || plan.ConfigID.IsUnknown() || plan.ConfigID.ValueString() == "") {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("allow_config_override"),
+			"Invalid Attribute Combination",
+			"allow_config_override can only be set to true when config_id is also specified.",
+		)
+		return
+	}
+
 	// Build create request
 	createReq := client.CreateAPIKeyRequest{
 		Name: plan.Name.ValueString(),
@@ -295,6 +325,23 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 			createReq.Defaults = &client.APIKeyDefaults{}
 		}
 		createReq.Defaults.Metadata = metadata
+	}
+
+	// Handle config_id
+	if !plan.ConfigID.IsNull() && !plan.ConfigID.IsUnknown() {
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.APIKeyDefaults{}
+		}
+		createReq.Defaults.ConfigID = plan.ConfigID.ValueString()
+	}
+
+	// Handle allow_config_override
+	if !plan.AllowConfigOverride.IsNull() && !plan.AllowConfigOverride.IsUnknown() {
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.APIKeyDefaults{}
+		}
+		v := plan.AllowConfigOverride.ValueBool()
+		createReq.Defaults.AllowConfigOverride = &v
 	}
 
 	// Handle usage_limits
@@ -398,6 +445,20 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		plan.Metadata = metadataMap
 	} else if plan.Metadata.IsNull() {
 		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle config_id from API
+	if apiKey.Defaults != nil && apiKey.Defaults.ConfigID != "" {
+		plan.ConfigID = types.StringValue(apiKey.Defaults.ConfigID)
+	} else {
+		plan.ConfigID = types.StringNull()
+	}
+
+	// Handle allow_config_override from API
+	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
+		plan.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	} else {
+		plan.AllowConfigOverride = types.BoolNull()
 	}
 
 	// Handle alert_emails from API
@@ -516,6 +577,20 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.Metadata = types.MapNull(types.StringType)
 	}
 
+	// Handle config_id from API
+	if apiKey.Defaults != nil && apiKey.Defaults.ConfigID != "" {
+		state.ConfigID = types.StringValue(apiKey.Defaults.ConfigID)
+	} else {
+		state.ConfigID = types.StringNull()
+	}
+
+	// Handle allow_config_override from API
+	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
+		state.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	} else {
+		state.AllowConfigOverride = types.BoolNull()
+	}
+
 	// Handle alert_emails from API
 	if len(apiKey.AlertEmails) > 0 {
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
@@ -568,6 +643,24 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
+	// Validate: allow_config_override = true requires a config_id to be present —
+	// either explicitly set in this update (config.ConfigID) or already bound on
+	// the key (state.ConfigID). This guards against setting the flag on a keyless config.
+	if !config.AllowConfigOverride.IsNull() && config.AllowConfigOverride.ValueBool() {
+		effectiveConfigID := state.ConfigID.ValueString() // existing binding from prior state
+		if !config.ConfigID.IsNull() {
+			effectiveConfigID = config.ConfigID.ValueString() // override with new value if provided
+		}
+		if effectiveConfigID == "" {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("allow_config_override"),
+				"Invalid Attribute Combination",
+				"allow_config_override can only be set to true when config_id is also specified.",
+			)
+			return
+		}
+	}
+
 	// Build update request
 	updateReq := client.UpdateAPIKeyRequest{
 		Name: plan.Name.ValueString(),
@@ -600,6 +693,27 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 			updateReq.Defaults = &client.APIKeyDefaults{}
 		}
 		updateReq.Defaults.Metadata = metadata
+	}
+
+	// Handle config_id: use config (HCL) to detect user intent.
+	// When config_id is present in HCL, send the new value.
+	// When absent (null in config), do not send — the API preserves the existing
+	// binding, and Computed will read it back on the next refresh.
+	if !config.ConfigID.IsNull() {
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		updateReq.Defaults.ConfigID = config.ConfigID.ValueString()
+	}
+
+	// Handle allow_config_override: same intent-detection pattern as config_id.
+	// We use a *bool so that an explicit false is sent (not omitted).
+	if !config.AllowConfigOverride.IsNull() {
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		v := config.AllowConfigOverride.ValueBool()
+		updateReq.Defaults.AllowConfigOverride = &v
 	}
 
 	// Handle usage_limits: use config (not plan) to detect user intent.
@@ -686,6 +800,21 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		plan.Metadata = metadataMap
 	} else if plan.Metadata.IsNull() {
 		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle config_id from API — always reflect the actual API state so that
+	// Computed correctly tracks the value when the user has not set it in HCL.
+	if apiKey.Defaults != nil && apiKey.Defaults.ConfigID != "" {
+		plan.ConfigID = types.StringValue(apiKey.Defaults.ConfigID)
+	} else {
+		plan.ConfigID = types.StringNull()
+	}
+
+	// Handle allow_config_override from API
+	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
+		plan.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	} else {
+		plan.AllowConfigOverride = types.BoolNull()
 	}
 
 	// Handle alert_emails from API

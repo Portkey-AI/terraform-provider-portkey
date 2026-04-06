@@ -645,10 +645,12 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	// Validate: allow_config_override = true requires a config_id to be present —
 	// either explicitly set in this update (config.ConfigID) or already bound on
-	// the key (state.ConfigID). This guards against setting the flag on a keyless config.
-	if !config.AllowConfigOverride.IsNull() && config.AllowConfigOverride.ValueBool() {
+	// the key (state.ConfigID). Skip validation when either attribute is Unknown
+	// (value is computed from an expression not yet resolved at plan time).
+	if !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() &&
+		config.AllowConfigOverride.ValueBool() {
 		effectiveConfigID := state.ConfigID.ValueString() // existing binding from prior state
-		if !config.ConfigID.IsNull() {
+		if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
 			effectiveConfigID = config.ConfigID.ValueString() // override with new value if provided
 		}
 		if effectiveConfigID == "" {
@@ -696,10 +698,11 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// Handle config_id: use config (HCL) to detect user intent.
-	// When config_id is present in HCL, send the new value.
-	// When absent (null in config), do not send — the API preserves the existing
-	// binding, and Computed will read it back on the next refresh.
-	if !config.ConfigID.IsNull() {
+	// When config_id is present and known in HCL, send the new value.
+	// When absent (null) or Unknown (computed expression not yet resolved),
+	// do not send — the API preserves the existing binding, and Computed will
+	// read it back on the next refresh.
+	if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
 		if updateReq.Defaults == nil {
 			updateReq.Defaults = &client.APIKeyDefaults{}
 		}
@@ -707,8 +710,10 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// Handle allow_config_override: same intent-detection pattern as config_id.
-	// We use a *bool so that an explicit false is sent (not omitted).
-	if !config.AllowConfigOverride.IsNull() {
+	// Guard with IsUnknown() so that an unresolved expression never produces a
+	// spurious false pointer that would silently overwrite the server value.
+	// We use a *bool so that an explicit false is preserved (not omitted).
+	if !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() {
 		if updateReq.Defaults == nil {
 			updateReq.Defaults = &client.APIKeyDefaults{}
 		}

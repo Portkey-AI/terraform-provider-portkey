@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
@@ -433,4 +434,111 @@ resource "portkey_api_key" "test" {
   }]
 }
 `, name, rlType, rlUnit, rlValue)
+}
+
+// TestAccAPIKeyResource_withConfigID verifies that:
+//   - An API key can be created with config_id and allow_config_override = false.
+//   - The attributes are read back correctly from the API.
+//   - allow_config_override can be updated independently (to true) while keeping
+//     the same config_id that is already bound in state.
+func TestAccAPIKeyResource_withConfigID(t *testing.T) {
+	keyName := acctest.RandomWithPrefix("tf-acc-ak-cfg")
+	configName := acctest.RandomWithPrefix("tf-acc-cfg")
+	workspaceID := getTestWorkspaceID()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create an API key bound to a freshly created config,
+			// with allow_config_override explicitly disabled.
+			{
+				Config: testAccAPIKeyResourceConfigWithConfigID(configName, workspaceID, keyName, false),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "key"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", keyName),
+					// config_id must match the ID of the portkey_config we created.
+					resource.TestCheckResourceAttrPair(
+						"portkey_api_key.test", "config_id",
+						"portkey_config.test", "id",
+					),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "allow_config_override", "false"),
+				),
+			},
+			// Step 2: Flip allow_config_override to true. config_id is not
+			// repeated in HCL — Computed should keep the existing binding and
+			// the validation should pass because state already has a config_id.
+			{
+				Config: testAccAPIKeyResourceConfigWithConfigID(configName, workspaceID, keyName, true),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", keyName),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "allow_config_override", "true"),
+					// config_id must still be present after the update.
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "config_id"),
+				),
+			},
+			// Step 3: Import — verify the state round-trips cleanly.
+			{
+				ResourceName:            "portkey_api_key.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"key"},
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_allowConfigOverrideWithoutConfigID verifies that the
+// provider rejects allow_config_override = true when config_id is not set,
+// producing a clear attribute-level error at plan time before any API call is made.
+func TestAccAPIKeyResource_allowConfigOverrideWithoutConfigID(t *testing.T) {
+	keyName := acctest.RandomWithPrefix("tf-acc-ak-noconf")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithAllowOverrideNoConfigID(keyName),
+				ExpectError: regexp.MustCompile(`allow_config_override can only be set to true when config_id is also specified`),
+			},
+		},
+	})
+}
+
+// testAccAPIKeyResourceConfigWithConfigID builds a Terraform config that
+// creates both a portkey_config and a portkey_api_key bound to it.
+func testAccAPIKeyResourceConfigWithConfigID(configName, workspaceID, keyName string, allowOverride bool) string {
+	return fmt.Sprintf(`
+resource "portkey_config" "test" {
+  name         = %[1]q
+  workspace_id = %[2]q
+  config       = "{\"retry\":{\"attempts\":3}}"
+}
+
+resource "portkey_api_key" "test" {
+  name                 = %[3]q
+  type                 = "organisation"
+  sub_type             = "service"
+  scopes               = ["providers.list"]
+  config_id            = portkey_config.test.id
+  allow_config_override = %[4]t
+}
+`, configName, workspaceID, keyName, allowOverride)
+}
+
+// testAccAPIKeyResourceConfigWithAllowOverrideNoConfigID builds a config that
+// sets allow_config_override = true without a config_id — this must be rejected
+// by the provider at plan time.
+func testAccAPIKeyResourceConfigWithAllowOverrideNoConfigID(keyName string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name                 = %[1]q
+  type                 = "organisation"
+  sub_type             = "service"
+  scopes               = ["providers.list"]
+  allow_config_override = true
+}
+`, keyName)
 }

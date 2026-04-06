@@ -18,9 +18,10 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &apiKeyResource{}
-	_ resource.ResourceWithConfigure   = &apiKeyResource{}
-	_ resource.ResourceWithImportState = &apiKeyResource{}
+	_ resource.Resource                 = &apiKeyResource{}
+	_ resource.ResourceWithConfigure    = &apiKeyResource{}
+	_ resource.ResourceWithImportState  = &apiKeyResource{}
+	_ resource.ResourceWithModifyPlan   = &apiKeyResource{}
 )
 
 // NewAPIKeyResource is a helper function to simplify the provider implementation.
@@ -59,6 +60,62 @@ type apiKeyResourceModel struct {
 // Metadata returns the resource type name.
 func (r *apiKeyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_api_key"
+}
+
+// ModifyPlan enforces the cross-attribute rule that allow_config_override=true
+// requires config_id to be present. Running this in ModifyPlan means the error
+// surfaces during `terraform plan`, before any API call is made.
+//
+// For Create: config_id must be present in the HCL config.
+// For Update: config_id can be omitted from HCL when it is already bound on the
+// key (Computed preserves it in state); we fall back to the state value in that case.
+// Skip when either attribute is Unknown (expression not yet resolved at plan time).
+func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Nothing to validate on destroy.
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var config apiKeyResourceModel
+	diags := req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Only enforce when allow_config_override is explicitly set to true.
+	// Skip when null (not configured) or Unknown (unresolved expression).
+	if config.AllowConfigOverride.IsNull() || config.AllowConfigOverride.IsUnknown() {
+		return
+	}
+	if !config.AllowConfigOverride.ValueBool() {
+		return
+	}
+
+	// Determine the effective config_id:
+	//   1. Start with the value already bound on the key (prior state, for Update).
+	//   2. Override with the value from HCL if it is explicitly set and known.
+	effectiveConfigID := ""
+	if !req.State.Raw.IsNull() {
+		var state apiKeyResourceModel
+		diags = req.State.Get(ctx, &state)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		effectiveConfigID = state.ConfigID.ValueString()
+	}
+	if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
+		effectiveConfigID = config.ConfigID.ValueString()
+	}
+
+	if effectiveConfigID == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("allow_config_override"),
+			"Invalid Attribute Combination",
+			"allow_config_override can only be set to true when config_id is also specified.",
+		)
+	}
 }
 
 // Schema defines the schema for the resource.
@@ -201,6 +258,9 @@ API Key Types:
 					"Optional. Once set, clearing this field in Terraform will not remove the binding from the API — use the Portkey API directly to unset it.",
 				Optional: true,
 				Computed: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"allow_config_override": schema.BoolAttribute{
 				Description: "Controls whether callers using this API key can override the bound config_id at request time. " +
@@ -268,19 +328,6 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		resp.Diagnostics.AddError(
 			"Missing Required Field",
 			"user_id is required when sub_type is 'user'",
-		)
-		return
-	}
-
-	// Validate: allow_config_override = true is only meaningful when config_id is also set.
-	// Setting it without a bound config is a configuration mistake.
-	if !plan.AllowConfigOverride.IsNull() && !plan.AllowConfigOverride.IsUnknown() &&
-		plan.AllowConfigOverride.ValueBool() &&
-		(plan.ConfigID.IsNull() || plan.ConfigID.IsUnknown() || plan.ConfigID.ValueString() == "") {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("allow_config_override"),
-			"Invalid Attribute Combination",
-			"allow_config_override can only be set to true when config_id is also specified.",
 		)
 		return
 	}
@@ -641,26 +688,6 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	// Validate: allow_config_override = true requires a config_id to be present —
-	// either explicitly set in this update (config.ConfigID) or already bound on
-	// the key (state.ConfigID). Skip validation when either attribute is Unknown
-	// (value is computed from an expression not yet resolved at plan time).
-	if !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() &&
-		config.AllowConfigOverride.ValueBool() {
-		effectiveConfigID := state.ConfigID.ValueString() // existing binding from prior state
-		if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
-			effectiveConfigID = config.ConfigID.ValueString() // override with new value if provided
-		}
-		if effectiveConfigID == "" {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("allow_config_override"),
-				"Invalid Attribute Combination",
-				"allow_config_override can only be set to true when config_id is also specified.",
-			)
-			return
-		}
 	}
 
 	// Build update request

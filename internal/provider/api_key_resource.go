@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -92,9 +93,17 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 		return
 	}
 
+	// If config_id is non-null but Unknown (e.g., config_id = portkey_config.test.id
+	// in the same plan), the user has explicitly provided it — the value is simply
+	// not resolved yet. Skip validation here; Terraform re-runs ModifyPlan at apply
+	// time once the value is known.
+	if !config.ConfigID.IsNull() && config.ConfigID.IsUnknown() {
+		return
+	}
+
 	// Determine the effective config_id:
 	//   1. Start with the value already bound on the key (prior state, for Update).
-	//   2. Override with the value from HCL if it is explicitly set and known.
+	//   2. Override with the HCL value when it is explicitly set and known.
 	effectiveConfigID := ""
 	if !req.State.Raw.IsNull() {
 		var state apiKeyResourceModel
@@ -258,6 +267,9 @@ API Key Types:
 					"Optional. Once set, clearing this field in Terraform will not remove the binding from the API — use the Portkey API directly to unset it.",
 				Optional: true,
 				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
 				},
@@ -269,6 +281,9 @@ API Key Types:
 					"Optional. Once set, clearing this field in Terraform will not remove it from the API — use the Portkey API directly to unset it.",
 				Optional: true,
 				Computed: true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the API key was created.",

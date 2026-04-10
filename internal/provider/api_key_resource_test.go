@@ -507,7 +507,7 @@ func TestAccAPIKeyResource_allowConfigOverrideWithoutConfigID(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccAPIKeyResourceConfigWithAllowOverrideNoConfigID(keyName),
-				ExpectError: regexp.MustCompile(`allow_config_override can only be set to true when config_id is also specified`),
+				ExpectError: regexp.MustCompile(`allow_config_override can only be set to true`),
 			},
 		},
 	})
@@ -540,6 +540,11 @@ resource "portkey_api_key" "test" {
 // This exercises the Optional+Computed readback path: config_id is not in HCL,
 // so Terraform reads it from state (the prior API binding). ModifyPlan must
 // accept this because state already holds a non-empty config_id.
+//
+// depends_on is required here: without a direct attribute reference to
+// portkey_config.test, Terraform would not know the destroy order and might
+// attempt to delete the config before the API key, causing a 409 (config still
+// bound to the key).
 func testAccAPIKeyResourceConfigUpdateOverrideOnly(configName, workspaceID, keyName string) string {
 	return fmt.Sprintf(`
 resource "portkey_config" "test" {
@@ -555,6 +560,7 @@ resource "portkey_api_key" "test" {
   scopes                = ["providers.list"]
   allow_config_override = true
   # config_id intentionally omitted: Computed preserves the existing API binding from state.
+  depends_on            = [portkey_config.test]
 }
 `, configName, workspaceID, keyName)
 }

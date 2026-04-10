@@ -37,19 +37,19 @@ type apiKeyResource struct {
 
 // apiKeyResourceModel maps the resource schema data.
 type apiKeyResourceModel struct {
-	ID             types.String `tfsdk:"id"`
-	Key            types.String `tfsdk:"key"`
-	Name           types.String `tfsdk:"name"`
-	Description    types.String `tfsdk:"description"`
-	Type           types.String `tfsdk:"type"`
-	SubType        types.String `tfsdk:"sub_type"`
-	OrganisationID types.String `tfsdk:"organisation_id"`
-	WorkspaceID    types.String `tfsdk:"workspace_id"`
-	UserID         types.String `tfsdk:"user_id"`
-	Status         types.String `tfsdk:"status"`
-	Scopes         types.List   `tfsdk:"scopes"`
-	RateLimits     types.List   `tfsdk:"rate_limits"`
-	UsageLimits    types.Object `tfsdk:"usage_limits"`
+	ID                  types.String `tfsdk:"id"`
+	Key                 types.String `tfsdk:"key"`
+	Name                types.String `tfsdk:"name"`
+	Description         types.String `tfsdk:"description"`
+	Type                types.String `tfsdk:"type"`
+	SubType             types.String `tfsdk:"sub_type"`
+	OrganisationID      types.String `tfsdk:"organisation_id"`
+	WorkspaceID         types.String `tfsdk:"workspace_id"`
+	UserID              types.String `tfsdk:"user_id"`
+	Status              types.String `tfsdk:"status"`
+	Scopes              types.List   `tfsdk:"scopes"`
+	RateLimits          types.List   `tfsdk:"rate_limits"`
+	UsageLimits         types.Object `tfsdk:"usage_limits"`
 	Metadata            types.Map    `tfsdk:"metadata"`
 	AlertEmails         types.List   `tfsdk:"alert_emails"`
 	ConfigID            types.String `tfsdk:"config_id"`
@@ -739,27 +739,49 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.Defaults.Metadata = metadata
 	}
 
-	// Handle config_id: use config (HCL) to detect user intent.
-	// When config_id is present and known in HCL, send the new value.
-	// When absent (null) or Unknown (computed expression not yet resolved),
-	// do not send — the API preserves the existing binding, and Computed will
-	// read it back on the next refresh.
+	// Handle config_id and allow_config_override.
+	//
+	// The Portkey API treats the `defaults` field as a full replacement on every
+	// update — it does not merge partial objects. This means omitting config_id
+	// or allow_config_override from the request body causes the API to reset
+	// those fields to their server defaults, producing an "inconsistent result
+	// after apply" error when Terraform's post-apply read sees different values.
+	//
+	// Strategy: always send the full, merged defaults object.
+	//   - If the user explicitly set a field in HCL (config is non-null, non-unknown),
+	//     use that value.
+	//   - Otherwise, fall back to whatever is in prior state so the API does not
+	//     wipe a value the user never intended to remove.
+	//
+	// config_id
 	if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
+		// User explicitly set a new value.
 		if updateReq.Defaults == nil {
 			updateReq.Defaults = &client.APIKeyDefaults{}
 		}
 		updateReq.Defaults.ConfigID = config.ConfigID.ValueString()
+	} else if !state.ConfigID.IsNull() && !state.ConfigID.IsUnknown() && state.ConfigID.ValueString() != "" {
+		// User omitted it — preserve the existing server-side binding.
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		updateReq.Defaults.ConfigID = state.ConfigID.ValueString()
 	}
 
-	// Handle allow_config_override: same intent-detection pattern as config_id.
-	// Guard with IsUnknown() so that an unresolved expression never produces a
-	// spurious false pointer that would silently overwrite the server value.
-	// We use a *bool so that an explicit false is preserved (not omitted).
+	// allow_config_override
 	if !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() {
+		// User explicitly set a new value. Use *bool so explicit false is sent.
 		if updateReq.Defaults == nil {
 			updateReq.Defaults = &client.APIKeyDefaults{}
 		}
 		v := config.AllowConfigOverride.ValueBool()
+		updateReq.Defaults.AllowConfigOverride = &v
+	} else if !state.AllowConfigOverride.IsNull() && !state.AllowConfigOverride.IsUnknown() {
+		// User omitted it — preserve the existing server-side value.
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		v := state.AllowConfigOverride.ValueBool()
 		updateReq.Defaults.AllowConfigOverride = &v
 	}
 

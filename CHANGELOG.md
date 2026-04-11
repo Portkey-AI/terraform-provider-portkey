@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-04-10
+
+### Added
+- **API Key Config Binding** - `portkey_api_key` now supports binding a default Portkey config:
+  - `config_id` - ID of the Portkey config to bind as the default for all requests made using this API key
+  - `allow_config_override` - Controls whether callers can override the bound config at request time (defaults to `false`)
+  - Plan-time validation prevents setting `allow_config_override = true` without a `config_id`
+  - Once set, clearing these fields in Terraform preserves the existing binding (use API directly to unset)
+
 ## [0.2.16] - 2026-03-13
 
 ### Fixed
@@ -255,7 +264,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...HEAD
+[0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...v0.2.14

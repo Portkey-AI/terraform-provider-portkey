@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -18,9 +19,10 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &apiKeyResource{}
-	_ resource.ResourceWithConfigure   = &apiKeyResource{}
-	_ resource.ResourceWithImportState = &apiKeyResource{}
+	_ resource.Resource                 = &apiKeyResource{}
+	_ resource.ResourceWithConfigure    = &apiKeyResource{}
+	_ resource.ResourceWithImportState  = &apiKeyResource{}
+	_ resource.ResourceWithModifyPlan   = &apiKeyResource{}
 )
 
 // NewAPIKeyResource is a helper function to simplify the provider implementation.
@@ -35,28 +37,94 @@ type apiKeyResource struct {
 
 // apiKeyResourceModel maps the resource schema data.
 type apiKeyResourceModel struct {
-	ID             types.String `tfsdk:"id"`
-	Key            types.String `tfsdk:"key"`
-	Name           types.String `tfsdk:"name"`
-	Description    types.String `tfsdk:"description"`
-	Type           types.String `tfsdk:"type"`
-	SubType        types.String `tfsdk:"sub_type"`
-	OrganisationID types.String `tfsdk:"organisation_id"`
-	WorkspaceID    types.String `tfsdk:"workspace_id"`
-	UserID         types.String `tfsdk:"user_id"`
-	Status         types.String `tfsdk:"status"`
-	Scopes         types.List   `tfsdk:"scopes"`
-	RateLimits     types.List   `tfsdk:"rate_limits"`
-	UsageLimits    types.Object `tfsdk:"usage_limits"`
-	Metadata       types.Map    `tfsdk:"metadata"`
-	AlertEmails    types.List   `tfsdk:"alert_emails"`
-	CreatedAt      types.String `tfsdk:"created_at"`
-	UpdatedAt      types.String `tfsdk:"updated_at"`
+	ID                  types.String `tfsdk:"id"`
+	Key                 types.String `tfsdk:"key"`
+	Name                types.String `tfsdk:"name"`
+	Description         types.String `tfsdk:"description"`
+	Type                types.String `tfsdk:"type"`
+	SubType             types.String `tfsdk:"sub_type"`
+	OrganisationID      types.String `tfsdk:"organisation_id"`
+	WorkspaceID         types.String `tfsdk:"workspace_id"`
+	UserID              types.String `tfsdk:"user_id"`
+	Status              types.String `tfsdk:"status"`
+	Scopes              types.List   `tfsdk:"scopes"`
+	RateLimits          types.List   `tfsdk:"rate_limits"`
+	UsageLimits         types.Object `tfsdk:"usage_limits"`
+	Metadata            types.Map    `tfsdk:"metadata"`
+	AlertEmails         types.List   `tfsdk:"alert_emails"`
+	ConfigID            types.String `tfsdk:"config_id"`
+	AllowConfigOverride types.Bool   `tfsdk:"allow_config_override"`
+	CreatedAt           types.String `tfsdk:"created_at"`
+	UpdatedAt           types.String `tfsdk:"updated_at"`
 }
 
 // Metadata returns the resource type name.
 func (r *apiKeyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_api_key"
+}
+
+// ModifyPlan enforces the cross-attribute rule that allow_config_override=true
+// requires config_id to be present. Running this in ModifyPlan means the error
+// surfaces during `terraform plan`, before any API call is made.
+//
+// For Create: config_id must be present in the HCL config.
+// For Update: config_id can be omitted from HCL when it is already bound on the
+// key (Computed preserves it in state); we fall back to the state value in that case.
+// Skip when either attribute is Unknown (expression not yet resolved at plan time).
+func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Nothing to validate on destroy.
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var config apiKeyResourceModel
+	diags := req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Only enforce when allow_config_override is explicitly set to true.
+	// Skip when null (not configured) or Unknown (unresolved expression).
+	if config.AllowConfigOverride.IsNull() || config.AllowConfigOverride.IsUnknown() {
+		return
+	}
+	if !config.AllowConfigOverride.ValueBool() {
+		return
+	}
+
+	// If config_id is non-null but Unknown (e.g., config_id = portkey_config.test.id
+	// in the same plan), the user has explicitly provided it — the value is simply
+	// not resolved yet. Skip validation here; Terraform re-runs ModifyPlan at apply
+	// time once the value is known.
+	if !config.ConfigID.IsNull() && config.ConfigID.IsUnknown() {
+		return
+	}
+
+	// Determine the effective config_id:
+	//   1. Start with the value already bound on the key (prior state, for Update).
+	//   2. Override with the HCL value when it is explicitly set and known.
+	effectiveConfigID := ""
+	if !req.State.Raw.IsNull() {
+		var state apiKeyResourceModel
+		diags = req.State.Get(ctx, &state)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		effectiveConfigID = state.ConfigID.ValueString()
+	}
+	if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
+		effectiveConfigID = config.ConfigID.ValueString()
+	}
+
+	if effectiveConfigID == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("allow_config_override"),
+			"Invalid Attribute Combination",
+			"allow_config_override can only be set to true when config_id is also specified.",
+		)
+	}
 }
 
 // Schema defines the schema for the resource.
@@ -193,6 +261,30 @@ API Key Types:
 				Optional:    true,
 				ElementType: types.StringType,
 			},
+			"config_id": schema.StringAttribute{
+				Description: "ID of the Portkey config to bind as the default config for all requests made using this API key. " +
+					"When set, every request using this key will apply this config by default. " +
+					"Optional. Once set, clearing this field in Terraform will not remove the binding from the API — use the Portkey API directly to unset it.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+			},
+			"allow_config_override": schema.BoolAttribute{
+				Description: "Controls whether callers using this API key can override the bound config_id at request time. " +
+					"Only meaningful when config_id is set. " +
+					"Set to false (default) to lock callers to the bound config; set to true to allow per-request config overrides. " +
+					"Optional. Once set, clearing this field in Terraform will not remove it from the API — use the Portkey API directly to unset it.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the API key was created.",
 				Computed:    true,
@@ -297,6 +389,23 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		createReq.Defaults.Metadata = metadata
 	}
 
+	// Handle config_id
+	if !plan.ConfigID.IsNull() && !plan.ConfigID.IsUnknown() {
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.APIKeyDefaults{}
+		}
+		createReq.Defaults.ConfigID = plan.ConfigID.ValueString()
+	}
+
+	// Handle allow_config_override
+	if !plan.AllowConfigOverride.IsNull() && !plan.AllowConfigOverride.IsUnknown() {
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.APIKeyDefaults{}
+		}
+		v := plan.AllowConfigOverride.ValueBool()
+		createReq.Defaults.AllowConfigOverride = &v
+	}
+
 	// Handle usage_limits
 	if !plan.UsageLimits.IsNull() && !plan.UsageLimits.IsUnknown() {
 		createReq.UsageLimits = terraformToAPIKeyUsageLimits(plan.UsageLimits)
@@ -398,6 +507,20 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		plan.Metadata = metadataMap
 	} else if plan.Metadata.IsNull() {
 		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle config_id from API
+	if apiKey.Defaults != nil && apiKey.Defaults.ConfigID != "" {
+		plan.ConfigID = types.StringValue(apiKey.Defaults.ConfigID)
+	} else {
+		plan.ConfigID = types.StringNull()
+	}
+
+	// Handle allow_config_override from API
+	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
+		plan.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	} else {
+		plan.AllowConfigOverride = types.BoolNull()
 	}
 
 	// Handle alert_emails from API
@@ -516,6 +639,20 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.Metadata = types.MapNull(types.StringType)
 	}
 
+	// Handle config_id from API
+	if apiKey.Defaults != nil && apiKey.Defaults.ConfigID != "" {
+		state.ConfigID = types.StringValue(apiKey.Defaults.ConfigID)
+	} else {
+		state.ConfigID = types.StringNull()
+	}
+
+	// Handle allow_config_override from API
+	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
+		state.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	} else {
+		state.AllowConfigOverride = types.BoolNull()
+	}
+
 	// Handle alert_emails from API
 	if len(apiKey.AlertEmails) > 0 {
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
@@ -602,6 +739,52 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.Defaults.Metadata = metadata
 	}
 
+	// Handle config_id and allow_config_override.
+	//
+	// The Portkey API treats the `defaults` field as a full replacement on every
+	// update — it does not merge partial objects. This means omitting config_id
+	// or allow_config_override from the request body causes the API to reset
+	// those fields to their server defaults, producing an "inconsistent result
+	// after apply" error when Terraform's post-apply read sees different values.
+	//
+	// Strategy: always send the full, merged defaults object.
+	//   - If the user explicitly set a field in HCL (config is non-null, non-unknown),
+	//     use that value.
+	//   - Otherwise, fall back to whatever is in prior state so the API does not
+	//     wipe a value the user never intended to remove.
+	//
+	// config_id
+	if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
+		// User explicitly set a new value.
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		updateReq.Defaults.ConfigID = config.ConfigID.ValueString()
+	} else if !state.ConfigID.IsNull() && !state.ConfigID.IsUnknown() && state.ConfigID.ValueString() != "" {
+		// User omitted it — preserve the existing server-side binding.
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		updateReq.Defaults.ConfigID = state.ConfigID.ValueString()
+	}
+
+	// allow_config_override
+	if !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() {
+		// User explicitly set a new value. Use *bool so explicit false is sent.
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		v := config.AllowConfigOverride.ValueBool()
+		updateReq.Defaults.AllowConfigOverride = &v
+	} else if !state.AllowConfigOverride.IsNull() && !state.AllowConfigOverride.IsUnknown() {
+		// User omitted it — preserve the existing server-side value.
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.APIKeyDefaults{}
+		}
+		v := state.AllowConfigOverride.ValueBool()
+		updateReq.Defaults.AllowConfigOverride = &v
+	}
+
 	// Handle usage_limits: use config (not plan) to detect user intent.
 	// Config is null when user removed the block; plan would be Unknown.
 	updateReq.UsageLimits = marshalAPIKeyUsageLimitsForUpdate(config.UsageLimits)
@@ -686,6 +869,21 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		plan.Metadata = metadataMap
 	} else if plan.Metadata.IsNull() {
 		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle config_id from API — always reflect the actual API state so that
+	// Computed correctly tracks the value when the user has not set it in HCL.
+	if apiKey.Defaults != nil && apiKey.Defaults.ConfigID != "" {
+		plan.ConfigID = types.StringValue(apiKey.Defaults.ConfigID)
+	} else {
+		plan.ConfigID = types.StringNull()
+	}
+
+	// Handle allow_config_override from API
+	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
+		plan.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	} else {
+		plan.AllowConfigOverride = types.BoolNull()
 	}
 
 	// Handle alert_emails from API

@@ -100,11 +100,13 @@ DELETE /admin/workspaces/{id}      → Delete (requires {"name": "..."} in body)
 
 ### Users
 ```
-GET    /admin/users                → List
+GET    /admin/users                → List (auto-paginated by provider)
 GET    /admin/users/{id}           → Read
 PUT    /admin/users/{id}           → Update (rejects if role unchanged)
 DELETE /admin/users/{id}           → Delete
 ```
+
+**List query parameters:** `pageSize`, `currentPage` (handled automatically), `email`, `role` (exposed as optional data source attributes)
 
 ### User Invites
 ```

@@ -57,10 +57,14 @@ resource "portkey_user_invite" "data_scientist" {
   ]
 }
 
-# Add an existing user to a workspace
+# Look up an existing user by email and add them to a workspace
+data "portkey_users" "senior_engineer" {
+  email = "senior-engineer@example.com"
+}
+
 resource "portkey_workspace_member" "senior_engineer" {
   workspace_id = portkey_workspace.engineering.id
-  user_id      = "existing-user-id" # Replace with actual user ID
+  user_id      = data.portkey_users.senior_engineer.users[0].id
   role         = "manager"
 }
 

@@ -28,7 +28,9 @@ type usersDataSource struct {
 
 // usersDataSourceModel maps the data source schema data.
 type usersDataSourceModel struct {
-	Users []userModel `tfsdk:"users"`
+	Email types.String `tfsdk:"email"`
+	Role  types.String `tfsdk:"role"`
+	Users []userModel  `tfsdk:"users"`
 }
 
 // userModel maps user data
@@ -49,8 +51,16 @@ func (d *usersDataSource) Metadata(_ context.Context, req datasource.MetadataReq
 // Schema defines the schema for the data source.
 func (d *usersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Fetches all Portkey users in the organization.",
+		Description: "Fetches all Portkey users in the organization. Automatically paginates through all pages. Supports optional server-side filtering by email or role.",
 		Attributes: map[string]schema.Attribute{
+			"email": schema.StringAttribute{
+				Description: "Filter users by email address. When set, only users matching this email are returned.",
+				Optional:    true,
+			},
+			"role": schema.StringAttribute{
+				Description: "Filter users by organization role. Valid values: admin, member, owner.",
+				Optional:    true,
+			},
 			"users": schema.ListNestedAttribute{
 				Description: "List of users.",
 				Computed:    true,
@@ -109,8 +119,21 @@ func (d *usersDataSource) Configure(_ context.Context, req datasource.ConfigureR
 func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var state usersDataSourceModel
 
-	// Get users from Portkey API
-	users, err := d.client.ListUsers(ctx)
+	diags := req.Config.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	params := &client.ListUsersParams{}
+	if !state.Email.IsNull() && !state.Email.IsUnknown() {
+		params.Email = state.Email.ValueString()
+	}
+	if !state.Role.IsNull() && !state.Role.IsUnknown() {
+		params.Role = state.Role.ValueString()
+	}
+
+	users, err := d.client.ListUsers(ctx, params)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Read Portkey Users",
@@ -119,7 +142,6 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		return
 	}
 
-	// Map response to state
 	for _, user := range users {
 		userState := userModel{
 			ID:        types.StringValue(user.ID),
@@ -132,8 +154,7 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		state.Users = append(state.Users, userState)
 	}
 
-	// Set state
-	diags := resp.State.Set(ctx, &state)
+	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

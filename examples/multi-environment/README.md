@@ -234,6 +234,12 @@ data "portkey_users" "all" {
   ]
 }
 
+# Look up a specific user by email (avoids iterating over all users)
+data "portkey_users" "eng_lead_lookup" {
+  email = var.engineering_lead_email
+  depends_on = [portkey_user_invite.eng_lead]
+}
+
 # ============================================================================
 # LOCAL VALUES - For Organization
 # ============================================================================

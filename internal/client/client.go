@@ -221,21 +221,53 @@ func (c *Client) GetUser(ctx context.Context, id string) (*User, error) {
 	return &user, nil
 }
 
-// ListUsers retrieves all users
-func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
-	respBody, err := c.doRequest(ctx, http.MethodGet, "/admin/users", nil)
-	if err != nil {
-		return nil, err
+// ListUsersParams holds optional filters for listing users.
+type ListUsersParams struct {
+	Email string
+	Role  string
+}
+
+// ListUsers retrieves all users, automatically paginating through every page.
+// Optional filters (email, role) are forwarded as query parameters.
+func (c *Client) ListUsers(ctx context.Context, params *ListUsersParams) ([]User, error) {
+	const pageSize = 100
+
+	var allUsers []User
+	currentPage := 0
+
+	for {
+		path := fmt.Sprintf("/admin/users?pageSize=%d&currentPage=%d", pageSize, currentPage)
+		if params != nil {
+			if params.Email != "" {
+				path += "&email=" + params.Email
+			}
+			if params.Role != "" {
+				path += "&role=" + params.Role
+			}
+		}
+
+		respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var response struct {
+			Total int    `json:"total"`
+			Data  []User `json:"data"`
+		}
+		if err := json.Unmarshal(respBody, &response); err != nil {
+			return nil, fmt.Errorf("error unmarshaling response: %w", err)
+		}
+
+		allUsers = append(allUsers, response.Data...)
+
+		if len(allUsers) >= response.Total || len(response.Data) == 0 {
+			break
+		}
+		currentPage++
 	}
 
-	var response struct {
-		Data []User `json:"data"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return response.Data, nil
+	return allUsers, nil
 }
 
 // UpdateUserRequest represents the request to update a user

@@ -43,7 +43,7 @@ All primary Portkey resources are now implemented in the Terraform provider.
 | `portkey_workspace` | Fetch single workspace by ID |
 | `portkey_workspaces` | List all workspaces |
 | `portkey_user` | Fetch single user by ID |
-| `portkey_users` | List all users |
+| `portkey_users` | List all users (auto-paginates, supports `email` and `role` filters) |
 | `portkey_integration` | Fetch single integration by slug |
 | `portkey_integrations` | List all integrations |
 | `portkey_provider` | Fetch single provider by ID |

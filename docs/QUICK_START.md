@@ -133,14 +133,32 @@ output "total_users" {
 }
 ```
 
-### Add a Workspace Member
+### Look Up a User by Email
 
-If you have an existing user, add them to a workspace:
+Use the `email` filter to resolve an email address to a user ID without fetching all users:
 
 ```hcl
+data "portkey_users" "manager" {
+  email = "manager@example.com"
+}
+
+output "manager_id" {
+  value = data.portkey_users.manager.users[0].id
+}
+```
+
+### Add a Workspace Member
+
+Look up a user by email and add them to a workspace:
+
+```hcl
+data "portkey_users" "member" {
+  email = "teammate@example.com"
+}
+
 resource "portkey_workspace_member" "existing_user" {
   workspace_id = portkey_workspace.my_first_workspace.id
-  user_id      = "user-id-from-portkey"
+  user_id      = data.portkey_users.member.users[0].id
   role         = "manager"
 }
 ```

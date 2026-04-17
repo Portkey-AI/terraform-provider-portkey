@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -236,15 +237,18 @@ func (c *Client) ListUsers(ctx context.Context, params *ListUsersParams) ([]User
 	currentPage := 0
 
 	for {
-		path := fmt.Sprintf("/admin/users?pageSize=%d&currentPage=%d", pageSize, currentPage)
+		q := url.Values{}
+		q.Set("pageSize", fmt.Sprintf("%d", pageSize))
+		q.Set("currentPage", fmt.Sprintf("%d", currentPage))
 		if params != nil {
 			if params.Email != "" {
-				path += "&email=" + params.Email
+				q.Set("email", params.Email)
 			}
 			if params.Role != "" {
-				path += "&role=" + params.Role
+				q.Set("role", params.Role)
 			}
 		}
+		path := "/admin/users?" + q.Encode()
 
 		respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
 		if err != nil {

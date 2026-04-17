@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
@@ -60,6 +62,9 @@ func (d *usersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 			"role": schema.StringAttribute{
 				Description: "Filter users by organization role. Valid values: admin, member, owner.",
 				Optional:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("admin", "member", "owner"),
+				},
 			},
 			"users": schema.ListNestedAttribute{
 				Description: "List of users.",

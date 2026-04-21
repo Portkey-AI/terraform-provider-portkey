@@ -134,9 +134,9 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	// -------------------------------------------------------------------------
 	if !config.RotationPolicy.IsNull() && !config.RotationPolicy.IsUnknown() {
 		attrs := config.RotationPolicy.Attributes()
-		rotationPeriod, _ := attrs["rotation_period"]
-		nextRotationAt, _ := attrs["next_rotation_at"]
-		keyTransitionMs, _ := attrs["key_transition_period_ms"]
+		rotationPeriod := attrs["rotation_period"]
+		nextRotationAt := attrs["next_rotation_at"]
+		keyTransitionMs := attrs["key_transition_period_ms"]
 
 		allNull := (rotationPeriod == nil || rotationPeriod.IsNull()) &&
 			(nextRotationAt == nil || nextRotationAt.IsNull()) &&
@@ -172,8 +172,8 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 			)
 		}
 
-		periodicReset, _ := attrs["periodic_reset"]
-		periodicResetDays, _ := attrs["periodic_reset_days"]
+		periodicReset := attrs["periodic_reset"]
+		periodicResetDays := attrs["periodic_reset_days"]
 		periodicResetSet := periodicReset != nil && !periodicReset.IsNull() && !periodicReset.IsUnknown()
 		periodicResetDaysSet := periodicResetDays != nil && !periodicResetDays.IsNull() && !periodicResetDays.IsUnknown()
 		if periodicResetSet && periodicResetDaysSet {

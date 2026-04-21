@@ -579,3 +579,438 @@ resource "portkey_api_key" "test" {
 }
 `, keyName)
 }
+
+// ----------------------------------------------------------------------------
+// expires_at tests
+// ----------------------------------------------------------------------------
+
+// TestAccAPIKeyResource_withExpiresAt verifies:
+//   - An API key can be created with expires_at set.
+//   - The value is read back correctly from the API.
+//   - expires_at can be updated in-place (no destroy/recreate).
+//   - An invalid (non-RFC3339) value is rejected at plan time.
+func TestAccAPIKeyResource_withExpiresAt(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-exp")
+	nameUpdated := name + "-upd"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with expires_at set.
+			{
+				Config: testAccAPIKeyResourceConfigWithExpiresAt(name, "2030-01-01T00:00:00Z"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", name),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "expires_at", "2030-01-01T00:00:00Z"),
+				),
+			},
+			// Step 2: Update expires_at in-place — no replacement should occur.
+			{
+				Config: testAccAPIKeyResourceConfigWithExpiresAt(nameUpdated, "2031-06-30T23:59:59Z"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", nameUpdated),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "expires_at", "2031-06-30T23:59:59Z"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_expiresAtInvalidFormat verifies that a non-RFC3339
+// expires_at value is rejected at plan time with a clear error.
+func TestAccAPIKeyResource_expiresAtInvalidFormat(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-expinv")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithExpiresAt(name, "not-a-date"),
+				ExpectError: regexp.MustCompile(`(?i)invalid.*rfc3339|rfc3339.*invalid`),
+			},
+		},
+	})
+}
+
+func testAccAPIKeyResourceConfigWithExpiresAt(name, expiresAt string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name       = %[1]q
+  type       = "organisation"
+  sub_type   = "service"
+  scopes     = ["providers.list"]
+  expires_at = %[2]q
+}
+`, name, expiresAt)
+}
+
+// ----------------------------------------------------------------------------
+// rotation_policy tests
+// ----------------------------------------------------------------------------
+
+// TestAccAPIKeyResource_withRotationPolicy verifies:
+//   - A key can be created with a rotation_policy (monthly, 1h transition).
+//   - next_rotation_at is computed by the API and read back into state.
+//   - The policy can be updated in-place (change to weekly).
+//   - An empty rotation_policy block is rejected at plan time.
+func TestAccAPIKeyResource_withRotationPolicy(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-rot")
+	nameUpdated := name + "-upd"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with monthly rotation, 1h transition.
+			{
+				Config: testAccAPIKeyResourceConfigWithRotationPolicy(name, "monthly", 3600000),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", name),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotation_policy.rotation_period", "monthly"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotation_policy.key_transition_period_ms", "3600000"),
+					// next_rotation_at is computed by the API.
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "rotation_policy.next_rotation_at"),
+				),
+			},
+			// Step 2: Update to weekly rotation in-place.
+			{
+				Config: testAccAPIKeyResourceConfigWithRotationPolicy(nameUpdated, "weekly", 1800000),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", nameUpdated),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotation_policy.rotation_period", "weekly"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotation_policy.key_transition_period_ms", "1800000"),
+				),
+			},
+			// Step 3: Import round-trip.
+			{
+				ResourceName:            "portkey_api_key.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"key"},
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_rotationPolicyBelowMinTransition verifies that
+// key_transition_period_ms < 1800000 is rejected at plan time.
+func TestAccAPIKeyResource_rotationPolicyBelowMinTransition(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-rotmin")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithRotationPolicy(name, "monthly", 60000), // 1 minute — below 30 min minimum
+				ExpectError: regexp.MustCompile(`(?i)at least 1800000`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_rotationPolicyEmptyBlock verifies that an all-null
+// rotation_policy block is rejected at plan time with a clear error.
+func TestAccAPIKeyResource_rotationPolicyEmptyBlock(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-rotempty")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithEmptyRotationPolicy(name),
+				ExpectError: regexp.MustCompile(`(?i)empty rotation_policy`),
+			},
+		},
+	})
+}
+
+func testAccAPIKeyResourceConfigWithRotationPolicy(name, period string, transitionMs int) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  rotation_policy = {
+    rotation_period          = %[2]q
+    key_transition_period_ms = %[3]d
+  }
+}
+`, name, period, transitionMs)
+}
+
+func testAccAPIKeyResourceConfigWithEmptyRotationPolicy(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  rotation_policy = {}
+}
+`, name)
+}
+
+// ----------------------------------------------------------------------------
+// reset_usage tests
+// ----------------------------------------------------------------------------
+
+// TestAccAPIKeyResource_resetUsage verifies the write-only trigger semantics:
+//   - Creating a key with reset_usage = true is accepted.
+//   - After apply, state stores null for reset_usage (trigger consumed).
+//   - Removing reset_usage from config produces no perpetual diff (state is null,
+//     config is null → no change in plan).
+func TestAccAPIKeyResource_resetUsage(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-reset")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create a key with usage_limits so there is usage to reset.
+			{
+				Config: testAccAPIKeyResourceConfigWithUsageLimits(name, 1000, "monthly"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", name),
+				),
+			},
+			// Step 2: Trigger a usage reset. State should store null for reset_usage
+			// after apply (trigger consumed), so next plan shows no change.
+			{
+				Config: testAccAPIKeyResourceConfigWithResetUsage(name),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("portkey_api_key.test", "reset_usage"),
+					// last_reset_at must be populated after a reset.
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "last_reset_at"),
+				),
+			},
+			// Step 3: Remove reset_usage from config — must produce no diff.
+			{
+				Config:             testAccAPIKeyResourceConfigWithUsageLimits(name, 1000, "monthly"),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+func testAccAPIKeyResourceConfigWithResetUsage(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  usage_limits = {
+    credit_limit   = 1000
+    periodic_reset = "monthly"
+  }
+
+  reset_usage = true
+}
+`, name)
+}
+
+// ----------------------------------------------------------------------------
+// expanded usage_limits tests
+// ----------------------------------------------------------------------------
+
+// TestAccAPIKeyResource_usageLimitsExpanded verifies the new usage_limits fields:
+//   - type ("tokens" or "cost")
+//   - periodic_reset_days as an alternative to periodic_reset
+//   - next_usage_reset_at computed by the API
+//   - Mutual exclusivity of periodic_reset and periodic_reset_days is enforced.
+//   - credit_limit is required when usage_limits is set.
+func TestAccAPIKeyResource_usageLimitsWithType(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-ultype")
+	nameUpdated := name + "-upd"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with type="tokens" and periodic_reset="monthly".
+			{
+				Config: testAccAPIKeyResourceConfigWithUsageLimitsType(name, "tokens", 500000, "monthly"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.type", "tokens"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credit_limit", "500000"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.periodic_reset", "monthly"),
+				),
+			},
+			// Step 2: Update to type="cost" and a different credit_limit.
+			{
+				Config: testAccAPIKeyResourceConfigWithUsageLimitsType(nameUpdated, "cost", 1000, "weekly"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", nameUpdated),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.type", "cost"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.credit_limit", "1000"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.periodic_reset", "weekly"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_usageLimitsPeriodicResetDays verifies periodic_reset_days.
+func TestAccAPIKeyResource_usageLimitsPeriodicResetDays(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-uldays")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAPIKeyResourceConfigWithPeriodicResetDays(name, 30),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "usage_limits.periodic_reset_days", "30"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_usageLimitsMissingCreditLimit verifies that omitting
+// credit_limit when usage_limits is set is rejected at plan time.
+func TestAccAPIKeyResource_usageLimitsMissingCreditLimit(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-ulnocl")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigUsageLimitsMissingCreditLimit(name),
+				ExpectError: regexp.MustCompile(`(?i)credit_limit is required`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_usageLimitsMutualExclusion verifies that setting both
+// periodic_reset and periodic_reset_days is rejected at plan time.
+func TestAccAPIKeyResource_usageLimitsMutualExclusion(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-ulmutex")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigUsageLimitsBothResets(name),
+				ExpectError: regexp.MustCompile(`(?i)mutually exclusive`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_usageLimitsPeriodicResetDaysZero verifies that
+// periodic_reset_days = 0 is rejected by the schema validator (minimum is 1).
+func TestAccAPIKeyResource_usageLimitsPeriodicResetDaysZero(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-ulr0")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithPeriodicResetDays(name, 0),
+				ExpectError: regexp.MustCompile(`(?i)between 1 and 365|at least 1`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_usageLimitsPeriodicResetDaysOverMax verifies that
+// periodic_reset_days = 366 is rejected by the schema validator (maximum is 365).
+func TestAccAPIKeyResource_usageLimitsPeriodicResetDaysOverMax(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-ulr366")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithPeriodicResetDays(name, 366),
+				ExpectError: regexp.MustCompile(`(?i)between 1 and 365|at most 365`),
+			},
+		},
+	})
+}
+
+func testAccAPIKeyResourceConfigWithUsageLimitsType(name, limitType string, creditLimit int, periodicReset string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  usage_limits = {
+    type           = %[2]q
+    credit_limit   = %[3]d
+    periodic_reset = %[4]q
+  }
+}
+`, name, limitType, creditLimit, periodicReset)
+}
+
+func testAccAPIKeyResourceConfigWithPeriodicResetDays(name string, days int) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  usage_limits = {
+    credit_limit        = 1000
+    periodic_reset_days = %[2]d
+  }
+}
+`, name, days)
+}
+
+func testAccAPIKeyResourceConfigUsageLimitsMissingCreditLimit(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  usage_limits = {
+    periodic_reset = "monthly"
+  }
+}
+`, name)
+}
+
+func testAccAPIKeyResourceConfigUsageLimitsBothResets(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  usage_limits = {
+    credit_limit        = 1000
+    periodic_reset      = "monthly"
+    periodic_reset_days = 30
+  }
+}
+`, name)
+}

@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -89,46 +92,111 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 		return
 	}
 
-	// Only enforce when allow_config_override is explicitly set to true.
-	// Skip when null (not configured) or Unknown (unresolved expression).
-	if config.AllowConfigOverride.IsNull() || config.AllowConfigOverride.IsUnknown() {
-		return
-	}
-	if !config.AllowConfigOverride.ValueBool() {
-		return
-	}
-
-	// If config_id is non-null but Unknown (e.g., config_id = portkey_config.test.id
-	// in the same plan), the user has explicitly provided it — the value is simply
-	// not resolved yet. Skip validation here; Terraform re-runs ModifyPlan at apply
-	// time once the value is known.
-	if !config.ConfigID.IsNull() && config.ConfigID.IsUnknown() {
-		return
-	}
-
-	// Determine the effective config_id:
-	//   1. Start with the value already bound on the key (prior state, for Update).
-	//   2. Override with the HCL value when it is explicitly set and known.
-	effectiveConfigID := ""
-	if !req.State.Raw.IsNull() {
-		var state apiKeyResourceModel
-		diags = req.State.Get(ctx, &state)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
+	// -------------------------------------------------------------------------
+	// 1. allow_config_override = true requires config_id.
+	//    Runs independently of all other checks below.
+	// -------------------------------------------------------------------------
+	if !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() &&
+		config.AllowConfigOverride.ValueBool() {
+		// If config_id is non-null but Unknown (e.g., config_id = portkey_config.test.id
+		// in the same plan), the user has provided it — the value is just not resolved yet.
+		// Skip; Terraform re-runs ModifyPlan at apply time once the value is known.
+		if config.ConfigID.IsNull() || (!config.ConfigID.IsNull() && !config.ConfigID.IsUnknown()) {
+			// Determine the effective config_id:
+			//   1. Start with the value already bound on the key (prior state, for Update).
+			//   2. Override with the HCL value when it is explicitly set and known.
+			effectiveConfigID := ""
+			if !req.State.Raw.IsNull() {
+				var state apiKeyResourceModel
+				diags = req.State.Get(ctx, &state)
+				resp.Diagnostics.Append(diags...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+				effectiveConfigID = state.ConfigID.ValueString()
+			}
+			if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
+				effectiveConfigID = config.ConfigID.ValueString()
+			}
+			if effectiveConfigID == "" {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("allow_config_override"),
+					"Invalid Attribute Combination",
+					"allow_config_override can only be set to true when config_id is also specified.",
+				)
+			}
 		}
-		effectiveConfigID = state.ConfigID.ValueString()
-	}
-	if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
-		effectiveConfigID = config.ConfigID.ValueString()
 	}
 
-	if effectiveConfigID == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("allow_config_override"),
-			"Invalid Attribute Combination",
-			"allow_config_override can only be set to true when config_id is also specified.",
-		)
+	// -------------------------------------------------------------------------
+	// 2. rotation_policy: treat an object where every field is null as "unset".
+	//    Prevents sending {} to the API, which would cause a confusing API error.
+	// -------------------------------------------------------------------------
+	if !config.RotationPolicy.IsNull() && !config.RotationPolicy.IsUnknown() {
+		attrs := config.RotationPolicy.Attributes()
+		rotationPeriod, _ := attrs["rotation_period"]
+		nextRotationAt, _ := attrs["next_rotation_at"]
+		keyTransitionMs, _ := attrs["key_transition_period_ms"]
+
+		allNull := (rotationPeriod == nil || rotationPeriod.IsNull()) &&
+			(nextRotationAt == nil || nextRotationAt.IsNull()) &&
+			(keyTransitionMs == nil || keyTransitionMs.IsNull())
+
+		if allNull {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("rotation_policy"),
+				"Empty rotation_policy Block",
+				"rotation_policy was set but all its fields are null. "+
+					"Provide at least one of rotation_period, next_rotation_at, or key_transition_period_ms, "+
+					"or remove the rotation_policy block entirely.",
+			)
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// 3. usage_limits: credit_limit is required when the block is present;
+	//    periodic_reset and periodic_reset_days are mutually exclusive.
+	//    Skip individual attribute checks when the value is Unknown (unresolved
+	//    expression) — validation will re-run at apply time once values are known.
+	// -------------------------------------------------------------------------
+	if !config.UsageLimits.IsNull() && !config.UsageLimits.IsUnknown() {
+		attrs := config.UsageLimits.Attributes()
+
+		creditLimit, hasCL := attrs["credit_limit"]
+		// Only enforce when credit_limit is known-null (deliberately omitted), not Unknown.
+		if !hasCL || (creditLimit.IsNull() && !creditLimit.IsUnknown()) {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("usage_limits").AtName("credit_limit"),
+				"Missing Required Attribute",
+				"credit_limit is required when usage_limits is configured.",
+			)
+		}
+
+		periodicReset, _ := attrs["periodic_reset"]
+		periodicResetDays, _ := attrs["periodic_reset_days"]
+		periodicResetSet := periodicReset != nil && !periodicReset.IsNull() && !periodicReset.IsUnknown()
+		periodicResetDaysSet := periodicResetDays != nil && !periodicResetDays.IsNull() && !periodicResetDays.IsUnknown()
+		if periodicResetSet && periodicResetDaysSet {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("usage_limits").AtName("periodic_reset_days"),
+				"Conflicting Attributes",
+				"periodic_reset and periodic_reset_days are mutually exclusive. Set one or the other, not both.",
+			)
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// 4. expires_at: validate it is a non-empty RFC3339 datetime when explicitly set.
+	// -------------------------------------------------------------------------
+	if !config.ExpiresAt.IsNull() && !config.ExpiresAt.IsUnknown() {
+		val := config.ExpiresAt.ValueString()
+		if _, err := time.Parse(time.RFC3339, val); err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("expires_at"),
+				"Invalid RFC3339 Datetime",
+				fmt.Sprintf("expires_at must be a valid RFC3339 datetime (e.g. \"2026-12-31T23:59:59Z\"), got: %q", val),
+			)
+		}
 	}
 }
 
@@ -237,6 +305,9 @@ API Key Types:
 					"periodic_reset_days": schema.Int64Attribute{
 						Description: "Custom reset interval in days (1–365). Alternative to periodic_reset for non-standard cadences.",
 						Optional:    true,
+						Validators: []validator.Int64{
+							int64validator.Between(1, 365),
+						},
 					},
 					"next_usage_reset_at": schema.StringAttribute{
 						Description: "ISO8601 datetime for the next scheduled usage reset. Optional override; computed by the API when periodic_reset is set.",
@@ -315,6 +386,9 @@ API Key Types:
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 			},
 			"last_reset_at": schema.StringAttribute{
 				Description: "Timestamp when this API key's usage counters were last reset. Managed by the API; read-only.",
@@ -350,6 +424,9 @@ API Key Types:
 					"key_transition_period_ms": schema.Int64Attribute{
 						Description: "How long (in milliseconds) both the old and new keys remain valid after rotation. Minimum 1800000 (30 minutes).",
 						Optional:    true,
+						Validators: []validator.Int64{
+							int64validator.AtLeast(1800000),
+						},
 					},
 				},
 			},
@@ -549,7 +626,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		plan.UserID = types.StringValue(apiKey.UserID)
 	}
 
-	// Handle scopes from API
+	// Handle scopes from API — always normalize to avoid Unknown in state.
 	if len(apiKey.Scopes) > 0 {
 		scopesList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.Scopes)
 		resp.Diagnostics.Append(diags...)
@@ -557,6 +634,8 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 			return
 		}
 		plan.Scopes = scopesList
+	} else {
+		plan.Scopes = types.ListValueMust(types.StringType, []attr.Value{})
 	}
 
 	// Handle usage_limits from API
@@ -583,7 +662,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 			return
 		}
 		plan.Metadata = metadataMap
-	} else if plan.Metadata.IsNull() {
+	} else {
 		plan.Metadata = types.MapNull(types.StringType)
 	}
 
@@ -624,7 +703,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	plan.RotationPolicy = rpObj
 
-	// Handle alert_emails from API
+	// Handle alert_emails from API — always normalize to avoid Unknown in state.
 	if len(apiKey.AlertEmails) > 0 {
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
 		resp.Diagnostics.Append(diags...)
@@ -632,7 +711,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 			return
 		}
 		plan.AlertEmails = alertEmailsList
-	} else if plan.AlertEmails.IsNull() {
+	} else {
 		plan.AlertEmails = types.ListNull(types.StringType)
 	}
 
@@ -705,7 +784,7 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		}
 	}
 
-	// Handle scopes
+	// Handle scopes — always normalize to avoid Unknown in state.
 	if len(apiKey.Scopes) > 0 {
 		scopesList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.Scopes)
 		resp.Diagnostics.Append(diags...)
@@ -713,6 +792,8 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 			return
 		}
 		state.Scopes = scopesList
+	} else {
+		state.Scopes = types.ListValueMust(types.StringType, []attr.Value{})
 	}
 
 	// Handle usage_limits from API
@@ -840,7 +921,7 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		Name: plan.Name.ValueString(),
 	}
 
-	if !plan.Description.IsNull() {
+	if !plan.Description.IsNull() && !plan.Description.IsUnknown() {
 		updateReq.Description = plan.Description.ValueString()
 	}
 
@@ -934,10 +1015,26 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// "user set null" from "user omitted the field" for Optional+Computed attributes).
 	if !config.ExpiresAt.IsNull() && !config.ExpiresAt.IsUnknown() {
 		// User explicitly set a new expiry datetime.
-		data, err := json.Marshal(config.ExpiresAt.ValueString())
-		if err == nil {
-			updateReq.ExpiresAt = data
+		// ModifyPlan already validates RFC3339 format, but guard here too for safety.
+		val := config.ExpiresAt.ValueString()
+		if _, err := time.Parse(time.RFC3339, val); err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("expires_at"),
+				"Invalid RFC3339 Datetime",
+				fmt.Sprintf("expires_at must be a valid RFC3339 datetime (e.g. \"2026-12-31T23:59:59Z\"), got: %q", val),
+			)
+			return
 		}
+		data, err := json.Marshal(val)
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("expires_at"),
+				"Error Encoding expires_at",
+				fmt.Sprintf("Could not encode expires_at value %q: %s", val, err),
+			)
+			return
+		}
+		updateReq.ExpiresAt = data
 	}
 
 	// Handle reset_usage: if the user set it to true, trigger a usage counter reset.
@@ -976,9 +1073,13 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	plan.CreatedAt = types.StringValue(apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	if !apiKey.UpdatedAt.IsZero() {
 		plan.UpdatedAt = types.StringValue(apiKey.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		// API did not return an updated_at value; preserve whatever is in state so
+		// Terraform does not see an Unknown value after apply.
+		plan.UpdatedAt = state.UpdatedAt
 	}
 
-	// Handle scopes from API
+	// Handle scopes from API — always normalize to avoid Unknown in state.
 	if len(apiKey.Scopes) > 0 {
 		scopesList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.Scopes)
 		resp.Diagnostics.Append(diags...)
@@ -986,6 +1087,8 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 			return
 		}
 		plan.Scopes = scopesList
+	} else {
+		plan.Scopes = types.ListValueMust(types.StringType, []attr.Value{})
 	}
 
 	// Handle usage_limits: if we sent null to clear, trust that (API has
@@ -1068,7 +1171,7 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 	plan.RotationPolicy = rpObj
 
-	// Handle alert_emails from API
+	// Handle alert_emails from API — always normalize to avoid Unknown in state.
 	if len(apiKey.AlertEmails) > 0 {
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
 		resp.Diagnostics.Append(diags...)
@@ -1076,7 +1179,7 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 			return
 		}
 		plan.AlertEmails = alertEmailsList
-	} else if plan.AlertEmails.IsNull() {
+	} else {
 		plan.AlertEmails = types.ListNull(types.StringType)
 	}
 

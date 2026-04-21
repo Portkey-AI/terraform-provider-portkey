@@ -591,11 +591,22 @@ func (c *Client) DeleteIntegration(ctx context.Context, slug string) error {
 	return err
 }
 
-// APIKeyDefaults represents the defaults configuration for an API key
+// APIKeyDefaults represents the defaults configuration for an API key (used in Create requests).
 type APIKeyDefaults struct {
 	Metadata            map[string]string `json:"metadata,omitempty"`
 	ConfigID            string            `json:"config_id,omitempty"`
 	AllowConfigOverride *bool             `json:"allow_config_override,omitempty"`
+}
+
+// UpdateAPIKeyDefaults represents the defaults in an Update (PUT) request.
+// ConfigID uses json.RawMessage for three-state semantics:
+//   - nil:              field omitted → no change to the existing binding
+//   - client.JSONNull:  sends "config_id": null → removes the pinned config
+//   - marshaled string: sends the new config UUID
+type UpdateAPIKeyDefaults struct {
+	ConfigID            json.RawMessage   `json:"config_id,omitempty"`
+	AllowConfigOverride *bool             `json:"allow_config_override,omitempty"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
 }
 
 // APIKey represents a Portkey API key
@@ -633,13 +644,16 @@ type RateLimit struct {
 }
 
 // UsageLimits represents usage limit configuration for API keys.
+// CreditLimit and AlertThreshold use float64 because the API spec defines them
+// as "number/float" — this avoids JSON unmarshal failures when the API returns
+// values like 10.0 (a float JSON literal that cannot be decoded into *int).
 type UsageLimits struct {
-	Type              string `json:"type,omitempty"` // "tokens" or "cost"
-	CreditLimit       *int   `json:"credit_limit,omitempty"`
-	AlertThreshold    *int   `json:"alert_threshold,omitempty"`
-	PeriodicReset     string `json:"periodic_reset,omitempty"`      // "monthly" or "weekly"
-	PeriodicResetDays *int   `json:"periodic_reset_days,omitempty"` // 1–365, alternative to PeriodicReset
-	NextUsageResetAt  string `json:"next_usage_reset_at,omitempty"` // ISO8601 datetime
+	Type              string   `json:"type,omitempty"` // "tokens" or "cost"
+	CreditLimit       *float64 `json:"credit_limit,omitempty"`
+	AlertThreshold    *float64 `json:"alert_threshold,omitempty"`
+	PeriodicReset     string   `json:"periodic_reset,omitempty"`      // "monthly" or "weekly"
+	PeriodicResetDays *int     `json:"periodic_reset_days,omitempty"` // 1–365, alternative to PeriodicReset
+	NextUsageResetAt  string   `json:"next_usage_reset_at,omitempty"` // ISO8601 datetime
 }
 
 // RotationPolicy configures automatic API key rotation.
@@ -675,17 +689,18 @@ type CreateAPIKeyResponse struct {
 // All fields are optional — only send what you want to change.
 //
 // Fields using json.RawMessage support three-state semantics:
-//   - nil:            field omitted from JSON → no change to existing value
+//   - nil:             field omitted from JSON → no change to existing value
 //   - client.JSONNull: sends "field": null    → clears/removes the value
 //   - marshaled JSON:  sends the new value
 type UpdateAPIKeyRequest struct {
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
-	RateLimits  json.RawMessage `json:"rate_limits,omitempty"`
-	UsageLimits json.RawMessage `json:"usage_limits,omitempty"`
-	Scopes      []string        `json:"scopes,omitempty"`
-	Defaults    *APIKeyDefaults `json:"defaults,omitempty"`
-	AlertEmails []string        `json:"alert_emails,omitempty"`
+	Name        string                `json:"name,omitempty"`
+	Description string                `json:"description,omitempty"`
+	RateLimits  json.RawMessage       `json:"rate_limits,omitempty"`
+	UsageLimits json.RawMessage       `json:"usage_limits,omitempty"`
+	Scopes      []string              `json:"scopes,omitempty"`
+	Defaults    *UpdateAPIKeyDefaults `json:"defaults,omitempty"`
+	// AlertEmails is three-state: nil = no change, JSONNull = clear all emails, array = set new list.
+	AlertEmails json.RawMessage `json:"alert_emails,omitempty"`
 	// ExpiresAt is three-state: nil = no change, JSONNull = clear expiry, string = set new expiry.
 	ExpiresAt json.RawMessage `json:"expires_at,omitempty"`
 	// ResetUsage triggers a usage counter reset when true. Not persisted by the API.

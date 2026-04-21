@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -92,6 +93,17 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 		return
 	}
 
+	// Read prior state once (only non-null during Update; null on Create).
+	var priorState apiKeyResourceModel
+	hasPriorState := !req.State.Raw.IsNull()
+	if hasPriorState {
+		diags = req.State.Get(ctx, &priorState)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	// -------------------------------------------------------------------------
 	// 1. allow_config_override = true requires config_id.
 	//    Runs independently of all other checks below.
@@ -106,14 +118,8 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 			//   1. Start with the value already bound on the key (prior state, for Update).
 			//   2. Override with the HCL value when it is explicitly set and known.
 			effectiveConfigID := ""
-			if !req.State.Raw.IsNull() {
-				var state apiKeyResourceModel
-				diags = req.State.Get(ctx, &state)
-				resp.Diagnostics.Append(diags...)
-				if resp.Diagnostics.HasError() {
-					return
-				}
-				effectiveConfigID = state.ConfigID.ValueString()
+			if hasPriorState {
+				effectiveConfigID = priorState.ConfigID.ValueString()
 			}
 			if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
 				effectiveConfigID = config.ConfigID.ValueString()
@@ -198,6 +204,166 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 			)
 		}
 	}
+
+	// -------------------------------------------------------------------------
+	// 5. rotation_policy: rotation_period and next_rotation_at are mutually
+	//    exclusive per the API spec. Also validate next_rotation_at is RFC3339.
+	// -------------------------------------------------------------------------
+	if !config.RotationPolicy.IsNull() && !config.RotationPolicy.IsUnknown() {
+		attrs := config.RotationPolicy.Attributes()
+
+		rotationPeriod := attrs["rotation_period"]
+		nextRotationAt := attrs["next_rotation_at"]
+
+		rotationPeriodSet := rotationPeriod != nil && !rotationPeriod.IsNull() && !rotationPeriod.IsUnknown()
+		nextRotationAtSet := nextRotationAt != nil && !nextRotationAt.IsNull() && !nextRotationAt.IsUnknown()
+
+		if rotationPeriodSet && nextRotationAtSet {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("rotation_policy").AtName("next_rotation_at"),
+				"Conflicting Attributes",
+				"rotation_period and next_rotation_at are mutually exclusive. Set one or the other, not both.",
+			)
+		}
+
+		if nextRotationAtSet {
+			if strVal, ok := nextRotationAt.(types.String); ok {
+				if _, err := time.Parse(time.RFC3339, strVal.ValueString()); err != nil {
+					resp.Diagnostics.AddAttributeError(
+						path.Root("rotation_policy").AtName("next_rotation_at"),
+						"Invalid RFC3339 Datetime",
+						fmt.Sprintf("next_rotation_at must be a valid RFC3339 datetime (e.g. \"2026-06-01T00:00:00Z\"), got: %q", strVal.ValueString()),
+					)
+				}
+			}
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// 6. usage_limits: alert_threshold must not exceed credit_limit.
+	// -------------------------------------------------------------------------
+	if !config.UsageLimits.IsNull() && !config.UsageLimits.IsUnknown() {
+		attrs := config.UsageLimits.Attributes()
+
+		creditLimitAttr := attrs["credit_limit"]
+		alertThresholdAttr := attrs["alert_threshold"]
+
+		creditLimitKnown := creditLimitAttr != nil && !creditLimitAttr.IsNull() && !creditLimitAttr.IsUnknown()
+		alertThresholdKnown := alertThresholdAttr != nil && !alertThresholdAttr.IsNull() && !alertThresholdAttr.IsUnknown()
+
+		if creditLimitKnown && alertThresholdKnown {
+			if clVal, ok := creditLimitAttr.(types.Int64); ok {
+				if atVal, ok := alertThresholdAttr.(types.Int64); ok {
+					if atVal.ValueInt64() > clVal.ValueInt64() {
+						resp.Diagnostics.AddAttributeError(
+							path.Root("usage_limits").AtName("alert_threshold"),
+							"Invalid Attribute Value",
+							fmt.Sprintf("alert_threshold (%d) must be less than or equal to credit_limit (%d).",
+								atVal.ValueInt64(), clVal.ValueInt64()),
+						)
+					}
+				}
+			}
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// 7. reset_usage: write-only trigger (Optional only, not Computed).
+	//    Only mark last_reset_at / updated_at Unknown when the reset is truly
+	//    new — i.e. config=true but the prior state did NOT already have true.
+	//    During a no-op non-refresh plan (config=true, state=true after apply),
+	//    we must NOT set Unknown or Terraform reports "non-refresh plan not empty".
+	// -------------------------------------------------------------------------
+	resetTriggered := !config.ResetUsage.IsNull() && !config.ResetUsage.IsUnknown() && config.ResetUsage.ValueBool()
+	if resetTriggered && hasPriorState &&
+		!priorState.ResetUsage.IsNull() && priorState.ResetUsage.ValueBool() {
+		// Reset was already in state from a previous apply — not a new trigger.
+		resetTriggered = false
+	}
+	if resetTriggered {
+		resp.Plan.SetAttribute(ctx, path.Root("last_reset_at"), types.StringUnknown())
+	}
+
+	// -------------------------------------------------------------------------
+	// 8a. config_id clearing: when the user removes config_id from HCL while
+	//     the prior state holds a bound config UUID, explicitly null the plan.
+	//     Without this, UseStateForUnknown would copy the old UUID into the plan,
+	//     but the provider will return null after clearing → "inconsistent result".
+	// -------------------------------------------------------------------------
+	if hasPriorState && config.ConfigID.IsNull() &&
+		!priorState.ConfigID.IsNull() && priorState.ConfigID.ValueString() != "" {
+		resp.Plan.SetAttribute(ctx, path.Root("config_id"), types.StringNull())
+	}
+
+	// -------------------------------------------------------------------------
+	// 8b. allow_config_override clearing: when the user removes the attribute
+	//     from HCL while prior state was non-null, explicitly null the plan so
+	//     the Update handler can write null without an "inconsistent result".
+	// -------------------------------------------------------------------------
+	if hasPriorState && config.AllowConfigOverride.IsNull() &&
+		!priorState.AllowConfigOverride.IsNull() {
+		resp.Plan.SetAttribute(ctx, path.Root("allow_config_override"), types.BoolNull())
+	}
+
+	// -------------------------------------------------------------------------
+	// 9. updated_at + rotation_policy.next_rotation_at consistency.
+	//
+	//    The TF Framework keeps the prior Computed value in the plan for Updates.
+	//    If the API's write timestamp differs from that prior value (e.g. the
+	//    apply spans a second boundary), Terraform reports "inconsistent result".
+	//
+	//    Detection strategy: compare user-controlled scalar attributes (name,
+	//    scopes, config_id …) and rotation_policy user sub-fields individually
+	//    to detect a true change — without false-positives from Computed sub-
+	//    fields (type, next_rotation_at, …) that live in state but not in HCL.
+	//
+	//    When a change is detected:
+	//      • Mark updated_at Unknown → provider can return any new timestamp.
+	//      • Mark rotation_policy.next_rotation_at Unknown → provider can return
+	//        the API-recomputed date without causing an inconsistency.
+	// -------------------------------------------------------------------------
+	if hasPriorState {
+		// allow_config_override: compare "effectively true" rather than raw value
+		// to avoid false positives when the API returns nil for an explicit
+		// false (config = false, state = null → both effectively not-true).
+		configACO := !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() && config.AllowConfigOverride.ValueBool()
+		priorACO := !priorState.AllowConfigOverride.IsNull() && !priorState.AllowConfigOverride.IsUnknown() && priorState.AllowConfigOverride.ValueBool()
+
+		// Scalar / simple Optional attribute diff.
+		// resetTriggered is already computed above (outside this block).
+		scalarChange := !config.Name.Equal(priorState.Name) ||
+			!config.Scopes.Equal(priorState.Scopes) ||
+			!config.ConfigID.Equal(priorState.ConfigID) ||
+			configACO != priorACO ||
+			!config.ExpiresAt.Equal(priorState.ExpiresAt) ||
+			// Null-vs-non-null transition for collections / nested blocks.
+			(config.UsageLimits.IsNull() != priorState.UsageLimits.IsNull()) ||
+			(config.RateLimits.IsNull() != priorState.RateLimits.IsNull()) ||
+			(config.Metadata.IsNull() != priorState.Metadata.IsNull()) ||
+			(config.AlertEmails.IsNull() != priorState.AlertEmails.IsNull()) ||
+			resetTriggered
+
+		// rotation_policy user-controlled sub-field diff (avoids false positives
+		// from the Computed next_rotation_at in state vs null in config).
+		var rotationChange bool
+		if config.RotationPolicy.IsNull() != priorState.RotationPolicy.IsNull() {
+			rotationChange = true
+		} else if !config.RotationPolicy.IsNull() && !priorState.RotationPolicy.IsNull() {
+			cAttrs := config.RotationPolicy.Attributes()
+			pAttrs := priorState.RotationPolicy.Attributes()
+			rotationChange = !cAttrs["rotation_period"].Equal(pAttrs["rotation_period"]) ||
+				!cAttrs["key_transition_period_ms"].Equal(pAttrs["key_transition_period_ms"])
+		}
+
+		if scalarChange || rotationChange {
+			resp.Plan.SetAttribute(ctx, path.Root("updated_at"), types.StringUnknown())
+		}
+		if rotationChange {
+			// next_rotation_at is recomputed by the API on every rotation_policy
+			// change. Mark it Unknown so the actual API-returned date is accepted.
+			resp.Plan.SetAttribute(ctx, path.Root("rotation_policy").AtName("next_rotation_at"), types.StringUnknown())
+		}
+	}
 }
 
 // Schema defines the schema for the resource.
@@ -226,12 +392,18 @@ API Key Types:
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the API key.",
+				Description: "Human-readable name for the API key (max 100 characters).",
 				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 100),
+				},
 			},
 			"description": schema.StringAttribute{
-				Description: "Optional description of the API key.",
+				Description: "Optional description of the API key (max 200 characters).",
 				Optional:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtMost(200),
+				},
 			},
 			"type": schema.StringAttribute{
 				Description: "Type of API key: 'organisation' (for Admin API keys) or 'workspace' (for workspace-scoped keys).",
@@ -288,12 +460,18 @@ API Key Types:
 						},
 					},
 					"credit_limit": schema.Int64Attribute{
-						Description: "The credit limit value (required when usage_limits is set).",
+						Description: "The credit limit value (required when usage_limits is set). Interpreted as USD when type is 'cost', or token count when type is 'tokens'. Minimum 0.",
 						Optional:    true,
+						Validators: []validator.Int64{
+							int64validator.AtLeast(0),
+						},
 					},
 					"alert_threshold": schema.Int64Attribute{
-						Description: "Alert threshold. Triggers email notification when usage reaches this amount.",
+						Description: "Send alert emails when usage reaches this value. Must be ≤ credit_limit. Minimum 0.",
 						Optional:    true,
+						Validators: []validator.Int64{
+							int64validator.AtLeast(0),
+						},
 					},
 					"periodic_reset": schema.StringAttribute{
 						Description: "When to reset the usage counter: 'monthly' or 'weekly'.",
@@ -313,6 +491,9 @@ API Key Types:
 						Description: "ISO8601 datetime for the next scheduled usage reset. Optional override; computed by the API when periodic_reset is set.",
 						Optional:    true,
 						Computed:    true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
 					},
 				},
 			},
@@ -337,8 +518,11 @@ API Key Types:
 							},
 						},
 						"value": schema.Int64Attribute{
-							Description: "The rate limit value.",
+							Description: "The rate limit value. Minimum 0.",
 							Required:    true,
+							Validators: []validator.Int64{
+								int64validator.AtLeast(0),
+							},
 						},
 					},
 				},
@@ -356,7 +540,7 @@ API Key Types:
 			"config_id": schema.StringAttribute{
 				Description: "ID of the Portkey config to bind as the default config for all requests made using this API key. " +
 					"When set, every request using this key will apply this config by default. " +
-					"Optional. Once set, clearing this field in Terraform will not remove the binding from the API — use the Portkey API directly to unset it.",
+					"Removing this field from your Terraform config sends null to the API, clearing the binding.",
 				Optional: true,
 				Computed: true,
 				PlanModifiers: []planmodifier.String{
@@ -369,7 +553,8 @@ API Key Types:
 			"allow_config_override": schema.BoolAttribute{
 				Description: "Controls whether callers using this API key can override the bound config_id at request time. " +
 					"Only meaningful when config_id is set. " +
-					"Set to false (default) to lock callers to the bound config; set to true to allow per-request config overrides. " +
+					"When false, the pinned config cannot be overridden at request time. " +
+					"When true (API default), per-request config overrides are allowed. " +
 					"Optional. Once set, clearing this field in Terraform will not remove it from the API — use the Portkey API directly to unset it.",
 				Optional: true,
 				Computed: true,
@@ -398,16 +583,20 @@ API Key Types:
 				},
 			},
 			"reset_usage": schema.BoolAttribute{
-				Description: "Set to true to trigger an immediate reset of this key's usage counters on the next apply. " +
-					"This is a one-shot trigger: after the reset is performed the state is set back to null, " +
-					"so the next plan will show a change again only if you keep reset_usage = true in your config. " +
+				Description: "Set to true to trigger an immediate reset of this key's usage counters. " +
+					"The value is stored in state as-is; Terraform will trigger a reset on every apply " +
+					"as long as reset_usage = true remains in your configuration. " +
 					"Remove or set to false to stop triggering resets.",
 				Optional: true,
 			},
 			"rotation_policy": schema.SingleNestedAttribute{
-				Description: "Automatic key rotation policy. When set, Portkey will rotate this key on the configured schedule.",
-				Optional:    true,
-				Computed:    true,
+				Description: "Automatic key rotation policy. When set, Portkey will rotate this key on the configured schedule. " +
+					"Removing this block from your Terraform config will not clear the policy from the API — use the Portkey API directly to unset it.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
 				Attributes: map[string]schema.Attribute{
 					"rotation_period": schema.StringAttribute{
 						Description: "How often to rotate the key: 'weekly' or 'monthly'.",
@@ -417,9 +606,16 @@ API Key Types:
 						},
 					},
 					"next_rotation_at": schema.StringAttribute{
-						Description: "ISO8601 datetime of the next scheduled rotation. Computed by the API; can be overridden.",
-						Optional:    true,
-						Computed:    true,
+						Description: "RFC3339 datetime of the next scheduled rotation (e.g. \"2026-06-01T00:00:00Z\"). " +
+							"Mutually exclusive with rotation_period. Computed by the API when rotation_period is set.",
+						Optional: true,
+						Computed: true,
+						PlanModifiers: []planmodifier.String{
+							stringplanmodifier.UseStateForUnknown(),
+						},
+						Validators: []validator.String{
+							stringvalidator.LengthAtLeast(1),
+						},
 					},
 					"key_transition_period_ms": schema.Int64Attribute{
 						Description: "How long (in milliseconds) both the old and new keys remain valid after rotation. Minimum 1800000 (30 minutes).",
@@ -646,29 +842,47 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	plan.UsageLimits = ulObj
 
-	// Handle rate_limits from API
-	rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
-	resp.Diagnostics.Append(rlDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	plan.RateLimits = rlList
-
-	// Handle metadata from API.
-	// Distinguish nil (field absent in API response → keep null) from non-nil empty
-	// (API returned {} → store an empty map so `metadata = {}` in HCL produces no diff).
-	switch {
-	case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
-		plan.Metadata = types.MapNull(types.StringType)
-	case len(apiKey.Defaults.Metadata) == 0:
-		plan.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
-	default:
-		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
-		resp.Diagnostics.Append(diags...)
+	// Handle rate_limits from API.
+	// Apply the same nil-vs-empty guard as the Read handler: when the API returns
+	// [] and the plan had null/unknown (user never configured rate_limits), store
+	// null so that subsequent anyChange comparisons don't see a spurious diff
+	// (null in config vs [] in state → false positive → updated_at = (known after apply)).
+	if apiKey.RateLimits == nil {
+		plan.RateLimits = types.ListNull(apiKeyRateLimitsObjectType)
+	} else if len(apiKey.RateLimits) == 0 {
+		if plan.RateLimits.IsNull() || plan.RateLimits.IsUnknown() {
+			plan.RateLimits = types.ListNull(apiKeyRateLimitsObjectType)
+		} else {
+			plan.RateLimits = types.ListValueMust(apiKeyRateLimitsObjectType, []attr.Value{})
+		}
+	} else {
+		rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+		resp.Diagnostics.Append(rlDiags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		plan.Metadata = metadataMap
+		plan.RateLimits = rlList
+	}
+
+	// Handle metadata from API.
+	// For Optional (non-Computed) attributes the post-apply state must match the
+	// plan exactly. Only read back from the API when the user actually configured
+	// metadata; otherwise keep plan's null to avoid an "inconsistent result" error
+	// when the API returns {} for a key whose metadata was never set.
+	if !plan.Metadata.IsNull() {
+		switch {
+		case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
+			plan.Metadata = types.MapNull(types.StringType)
+		case len(apiKey.Defaults.Metadata) == 0:
+			plan.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		default:
+			metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			plan.Metadata = metadataMap
+		}
 	}
 
 	// Handle config_id from API
@@ -679,10 +893,19 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// Handle allow_config_override from API.
-	// The API returns this as a top-level integer (null/0/1), not inside defaults.
-	if apiKey.AllowConfigOverride != nil {
-		plan.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
+	// Because the attribute is Optional+Computed, the plan value is Unknown when
+	// the user omitted it (UseStateForUnknown has nothing to copy on Create).
+	// Only sync from the API response when the user explicitly provided a value
+	// (non-null AND non-unknown). When Unknown or null, store null so the next
+	// non-refresh plan sees null==null and does not report a spurious diff.
+	if !plan.AllowConfigOverride.IsNull() && !plan.AllowConfigOverride.IsUnknown() {
+		if apiKey.AllowConfigOverride != nil {
+			plan.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
+		} else {
+			plan.AllowConfigOverride = types.BoolNull()
+		}
 	} else {
+		// User did not configure it (omitted or Unknown) → store null.
 		plan.AllowConfigOverride = types.BoolNull()
 	}
 
@@ -709,24 +932,27 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	plan.RotationPolicy = rpObj
 
 	// Handle alert_emails from API.
-	// Distinguish nil (field absent → null) from non-nil empty (API returned [] →
-	// empty list) so that `alert_emails = []` in HCL produces no perpetual diff.
-	switch {
-	case apiKey.AlertEmails == nil:
-		plan.AlertEmails = types.ListNull(types.StringType)
-	case len(apiKey.AlertEmails) == 0:
-		plan.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
-	default:
-		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
+	// Same Optional-field rule as metadata: only read from the API response when
+	// the user configured alert_emails; keep null otherwise.
+	if !plan.AlertEmails.IsNull() {
+		switch {
+		case apiKey.AlertEmails == nil:
+			plan.AlertEmails = types.ListNull(types.StringType)
+		case len(apiKey.AlertEmails) == 0:
+			plan.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
+		default:
+			alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			plan.AlertEmails = alertEmailsList
 		}
-		plan.AlertEmails = alertEmailsList
 	}
 
-	// reset_usage is a write-only trigger not returned by the API; always null in state.
-	plan.ResetUsage = types.BoolNull()
+	// reset_usage is a write-only trigger not returned by the API.
+	// plan.ResetUsage already holds the config value from req.Plan.Get above —
+	// keep it so the post-apply state matches the plan (avoids "inconsistent result").
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -806,30 +1032,80 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.Scopes = types.ListValueMust(types.StringType, []attr.Value{})
 	}
 
-	// Handle usage_limits from API
-	ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
-	resp.Diagnostics.Append(ulDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Handle usage_limits from API.
+	// When prior state has usage_limits, merge: preserve user-configured Optional
+	// fields from prior state (avoids stale API data overwriting values just
+	// applied) and only update the server-computed next_usage_reset_at from the
+	// API response. When prior state is null (Create, Import, or just-cleared),
+	// use the full API value.
+	if apiKey.UsageLimits != nil {
+		if !state.UsageLimits.IsNull() && !state.UsageLimits.IsUnknown() {
+			priorUL := terraformToAPIKeyUsageLimits(state.UsageLimits)
+			mergedUL := &client.UsageLimits{
+				Type:              priorUL.Type,
+				CreditLimit:       priorUL.CreditLimit,
+				AlertThreshold:    priorUL.AlertThreshold,
+				PeriodicReset:     priorUL.PeriodicReset,
+				PeriodicResetDays: priorUL.PeriodicResetDays,
+				NextUsageResetAt:  apiKey.UsageLimits.NextUsageResetAt,
+			}
+			ulObj, ulDiags := apiKeyUsageLimitsToTerraform(mergedUL)
+			resp.Diagnostics.Append(ulDiags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			state.UsageLimits = ulObj
+		} else {
+			ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+			resp.Diagnostics.Append(ulDiags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			state.UsageLimits = ulObj
+		}
+	} else {
+		state.UsageLimits = types.ObjectNull(apiKeyUsageLimitsAttrTypes)
 	}
-	state.UsageLimits = ulObj
 
-	// Handle rate_limits from API
-	rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
-	resp.Diagnostics.Append(rlDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Handle rate_limits from API.
+	// Distinguish nil (field absent → null) from non-nil empty (API returns [] for
+	// every key regardless of whether rate_limits was ever configured).
+	// When the API returns [] and the prior state was null (user never configured
+	// rate_limits), keep null to prevent a perpetual "empty list vs null" diff
+	// and to avoid plan inconsistency in subsequent update steps.
+	if apiKey.RateLimits == nil {
+		state.RateLimits = types.ListNull(apiKeyRateLimitsObjectType)
+	} else if len(apiKey.RateLimits) == 0 {
+		// API returned empty rate_limits. If the prior state was null, preserve null.
+		if !state.RateLimits.IsNull() {
+			state.RateLimits = types.ListValueMust(apiKeyRateLimitsObjectType, []attr.Value{})
+		}
+		// else: state.RateLimits stays null (prior state was null → keep it null)
+	} else {
+		rlList, rlDiags := apiKeyRateLimitsToTerraformList(apiKey.RateLimits)
+		resp.Diagnostics.Append(rlDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.RateLimits = rlList
 	}
-	state.RateLimits = rlList
 
 	// Handle metadata from API.
-	// Distinguish nil (field absent → null) from non-nil empty (API returned {} →
-	// empty map) so that `metadata = {}` in HCL produces no perpetual diff.
+	// Distinguish nil (field absent → null) from non-nil empty (API returns {} for
+	// every key regardless of whether metadata was ever configured).
+	// When the API returns {} and the prior state was null (user never configured
+	// metadata), keep null to prevent a perpetual "empty map vs null" diff.
 	switch {
 	case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
 		state.Metadata = types.MapNull(types.StringType)
 	case len(apiKey.Defaults.Metadata) == 0:
-		state.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		// API returned empty metadata. If the prior state was null (user never
+		// configured metadata), preserve null to avoid a perpetual diff where the
+		// plan sees config=null vs state={}.
+		if !state.Metadata.IsNull() {
+			state.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		}
+		// else: state.Metadata stays null (prior state was null → keep it null)
 	default:
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
 		resp.Diagnostics.Append(diags...)
@@ -848,11 +1124,20 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	// Handle allow_config_override from API.
 	// The API returns this as a top-level integer (null/0/1), not inside defaults.
-	if apiKey.AllowConfigOverride != nil {
-		state.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
-	} else {
-		state.AllowConfigOverride = types.BoolNull()
+	// Only sync from the API when the prior state already tracked a value (i.e. the
+	// user explicitly configured it via Terraform). When the prior state is null
+	// (user never set it), the API may return a server-side default (0 or 1) that
+	// we should not silently import — doing so would cause ImportStateVerify
+	// mismatches and unexpected state drift for resources the user didn't configure.
+	if !state.AllowConfigOverride.IsNull() {
+		// User previously configured this attribute → always sync from API.
+		if apiKey.AllowConfigOverride != nil {
+			state.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
+		} else {
+			state.AllowConfigOverride = types.BoolNull()
+		}
 	}
+	// else: prior state was null → keep null, regardless of the API value.
 
 	// Handle expires_at from API
 	if apiKey.ExpiresAt != nil {
@@ -877,13 +1162,20 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	state.RotationPolicy = rpObj
 
 	// Handle alert_emails from API.
-	// Distinguish nil (field absent → null) from non-nil empty (API returned [] →
-	// empty list) so that `alert_emails = []` in HCL produces no perpetual diff.
+	// Distinguish nil (field absent → null) from non-nil empty (API returns [] for
+	// every key regardless of whether alert_emails was ever configured).
+	// When the API returns [] and the prior state was null (user never configured
+	// alert_emails), keep null to prevent a perpetual "empty list vs null" diff.
 	switch {
 	case apiKey.AlertEmails == nil:
 		state.AlertEmails = types.ListNull(types.StringType)
 	case len(apiKey.AlertEmails) == 0:
-		state.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
+		// API returned empty alert_emails. If the prior state was null (user never
+		// configured alert_emails), preserve null to avoid a perpetual diff.
+		if !state.AlertEmails.IsNull() {
+			state.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
+		}
+		// else: state.AlertEmails stays null (prior state was null → keep it null)
 	default:
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
 		resp.Diagnostics.Append(diags...)
@@ -898,8 +1190,12 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.UpdatedAt = types.StringValue(apiKey.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	}
 
-	// reset_usage is a write-only trigger not returned by the API; always null in state.
-	state.ResetUsage = types.BoolNull()
+	// reset_usage is a write-only trigger not returned by the API.
+	// Preserve whatever was in prior state (null or true) — the API never
+	// returns this field, so Read must not change it. If the user keeps
+	// reset_usage = true in HCL and Read zeroes it out, Terraform would see
+	// a diff (config=true, state=null) on every refresh → non-empty plan.
+	// The value only transitions true→null when the user removes it from HCL.
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
@@ -965,52 +1261,54 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 			return
 		}
 		if updateReq.Defaults == nil {
-			updateReq.Defaults = &client.APIKeyDefaults{}
+			updateReq.Defaults = &client.UpdateAPIKeyDefaults{}
 		}
 		updateReq.Defaults.Metadata = metadata
 	}
 
 	// Handle config_id and allow_config_override.
 	//
-	// The Portkey API treats the `defaults` field as a full replacement on every
-	// update — it does not merge partial objects. This means omitting config_id
-	// or allow_config_override from the request body causes the API to reset
-	// those fields to their server defaults, producing an "inconsistent result
-	// after apply" error when Terraform's post-apply read sees different values.
+	// config_id uses three-state json.RawMessage in UpdateAPIKeyDefaults:
+	//   - nil         → field omitted → no change to existing binding
+	//   - JSONNull    → "config_id": null → removes the pinned config
+	//   - JSON string → sets a new config UUID
 	//
-	// Strategy: always send the full, merged defaults object.
-	//   - If the user explicitly set a field in HCL (config is non-null, non-unknown),
-	//     use that value.
-	//   - Otherwise, fall back to whatever is in prior state so the API does not
-	//     wipe a value the user never intended to remove.
-	//
-	// config_id
+	// Because config_id has no UseStateForUnknown, config.ConfigID is null when
+	// the user removes the field from HCL, which is an explicit intent to clear it.
 	if !config.ConfigID.IsNull() && !config.ConfigID.IsUnknown() {
-		// User explicitly set a new value.
+		// User explicitly set a config UUID.
 		if updateReq.Defaults == nil {
-			updateReq.Defaults = &client.APIKeyDefaults{}
+			updateReq.Defaults = &client.UpdateAPIKeyDefaults{}
 		}
-		updateReq.Defaults.ConfigID = config.ConfigID.ValueString()
-	} else if !state.ConfigID.IsNull() && !state.ConfigID.IsUnknown() && state.ConfigID.ValueString() != "" {
-		// User omitted it — preserve the existing server-side binding.
+		data, err := json.Marshal(config.ConfigID.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(path.Root("config_id"),
+				"Error Encoding config_id",
+				"Could not encode config_id: "+err.Error())
+			return
+		}
+		updateReq.Defaults.ConfigID = data
+	} else if !state.ConfigID.IsNull() && state.ConfigID.ValueString() != "" {
+		// User removed config_id from HCL while state had a value → send null to clear.
 		if updateReq.Defaults == nil {
-			updateReq.Defaults = &client.APIKeyDefaults{}
+			updateReq.Defaults = &client.UpdateAPIKeyDefaults{}
 		}
-		updateReq.Defaults.ConfigID = state.ConfigID.ValueString()
+		updateReq.Defaults.ConfigID = client.JSONNull
 	}
+	// else: both config and state are null → no config_id entry in defaults
 
 	// allow_config_override
 	if !config.AllowConfigOverride.IsNull() && !config.AllowConfigOverride.IsUnknown() {
 		// User explicitly set a new value. Use *bool so explicit false is sent.
 		if updateReq.Defaults == nil {
-			updateReq.Defaults = &client.APIKeyDefaults{}
+			updateReq.Defaults = &client.UpdateAPIKeyDefaults{}
 		}
 		v := config.AllowConfigOverride.ValueBool()
 		updateReq.Defaults.AllowConfigOverride = &v
 	} else if !state.AllowConfigOverride.IsNull() && !state.AllowConfigOverride.IsUnknown() {
 		// User omitted it — preserve the existing server-side value.
 		if updateReq.Defaults == nil {
-			updateReq.Defaults = &client.APIKeyDefaults{}
+			updateReq.Defaults = &client.UpdateAPIKeyDefaults{}
 		}
 		v := state.AllowConfigOverride.ValueBool()
 		updateReq.Defaults.AllowConfigOverride = &v
@@ -1065,15 +1363,28 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		updateReq.ResetUsage = &v
 	}
 
-	// Handle alert_emails
-	if !plan.AlertEmails.IsNull() && !plan.AlertEmails.IsUnknown() {
+	// Handle alert_emails using three-state json.RawMessage semantics:
+	//   - config null, state null   → nil    → no change (omit field)
+	//   - config null, state non-null → JSONNull → send null to clear all emails
+	//   - config non-null            → marshal → send the new list (including empty [])
+	if !config.AlertEmails.IsNull() && !config.AlertEmails.IsUnknown() {
 		var alertEmails []string
-		diags = plan.AlertEmails.ElementsAs(ctx, &alertEmails, false)
+		diags = config.AlertEmails.ElementsAs(ctx, &alertEmails, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		updateReq.AlertEmails = alertEmails
+		data, err := json.Marshal(alertEmails)
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(path.Root("alert_emails"),
+				"Error Encoding alert_emails",
+				"Could not encode alert_emails: "+err.Error())
+			return
+		}
+		updateReq.AlertEmails = data
+	} else if !state.AlertEmails.IsNull() {
+		// User removed alert_emails from HCL while state had values → send null to clear.
+		updateReq.AlertEmails = client.JSONNull
 	}
 
 	apiKey, err := r.client.UpdateAPIKey(ctx, state.ID.ValueString(), updateReq)
@@ -1094,8 +1405,6 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	if !apiKey.UpdatedAt.IsZero() {
 		plan.UpdatedAt = types.StringValue(apiKey.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	} else {
-		// API did not return an updated_at value; preserve whatever is in state so
-		// Terraform does not see an Unknown value after apply.
 		plan.UpdatedAt = state.UpdatedAt
 	}
 
@@ -1112,13 +1421,22 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// Handle usage_limits: if we sent null to clear, trust that (API has
-	// eventual consistency and may return stale data). Otherwise read from API.
-	// Use config (not plan) because Optional+Computed plan values are Unknown,
-	// not Null, when user removes the block.
+	// eventual consistency and may return stale data). Otherwise build the result
+	// by merging: config values for all user-set fields (avoids stale API response
+	// giving back old values like type), and the computed next_usage_reset_at from
+	// the API response.
 	if config.UsageLimits.IsNull() {
 		plan.UsageLimits = types.ObjectNull(apiKeyUsageLimitsAttrTypes)
 	} else {
-		ulObj, ulDiags := apiKeyUsageLimitsToTerraform(apiKey.UsageLimits)
+		configUL := terraformToAPIKeyUsageLimits(config.UsageLimits)
+		if configUL != nil {
+			// Fill in the server-computed field from the API response when the user
+			// did not explicitly supply it in config.
+			if apiKey.UsageLimits != nil && configUL.NextUsageResetAt == "" {
+				configUL.NextUsageResetAt = apiKey.UsageLimits.NextUsageResetAt
+			}
+		}
+		ulObj, ulDiags := apiKeyUsageLimitsToTerraform(configUL)
 		resp.Diagnostics.Append(ulDiags...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -1139,20 +1457,25 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// Handle metadata from API.
-	// Distinguish nil (field absent → null) from non-nil empty (API returned {} →
-	// empty map) so that `metadata = {}` in HCL produces no perpetual diff.
-	switch {
-	case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
-		plan.Metadata = types.MapNull(types.StringType)
-	case len(apiKey.Defaults.Metadata) == 0:
-		plan.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
-	default:
-		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
+	// metadata is Optional (not Computed): the plan always holds exactly what the
+	// user wrote in config (null if omitted). Only read back from the API when the
+	// user actually configured metadata; otherwise keep the plan's null to avoid an
+	// "inconsistent result after apply" error (UpdateAPIKey can return {} even when
+	// metadata was never set).
+	if !plan.Metadata.IsNull() {
+		switch {
+		case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
+			plan.Metadata = types.MapNull(types.StringType)
+		case len(apiKey.Defaults.Metadata) == 0:
+			plan.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		default:
+			metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			plan.Metadata = metadataMap
 		}
-		plan.Metadata = metadataMap
 	}
 
 	// Handle config_id from API — always reflect the actual API state so that
@@ -1164,10 +1487,18 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// Handle allow_config_override from API.
-	// The API returns this as a top-level integer (null/0/1), not inside defaults.
-	if apiKey.AllowConfigOverride != nil {
-		plan.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
+	// Only sync from the API response when the user still actively manages the
+	// attribute (config is non-null). When the user has dropped it from HCL
+	// (config is null), store null so the next plan comparison sees null==null
+	// and does not produce a spurious "updated_at = (known after apply)" diff.
+	if !config.AllowConfigOverride.IsNull() {
+		if apiKey.AllowConfigOverride != nil {
+			plan.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
+		} else {
+			plan.AllowConfigOverride = types.BoolNull()
+		}
 	} else {
+		// User removed allow_config_override from HCL — stop tracking it.
 		plan.AllowConfigOverride = types.BoolNull()
 	}
 
@@ -1185,32 +1516,44 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		plan.LastResetAt = types.StringNull()
 	}
 
-	// reset_usage is a write-only trigger not returned by the API; consume it after apply.
-	plan.ResetUsage = types.BoolNull()
+	// reset_usage is not returned by the API. Keep whatever the plan had
+	// (i.e. the config value) so the post-apply state matches the plan.
+	// plan.ResetUsage is already set from req.Plan.Get above.
 
-	// Handle rotation_policy from API
-	rpObj, rpDiags := apiKeyRotationPolicyToTerraform(apiKey.RotationPolicy)
-	resp.Diagnostics.Append(rpDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	plan.RotationPolicy = rpObj
-
-	// Handle alert_emails from API.
-	// Distinguish nil (field absent → null) from non-nil empty (API returned [] →
-	// empty list) so that `alert_emails = []` in HCL produces no perpetual diff.
-	switch {
-	case apiKey.AlertEmails == nil:
-		plan.AlertEmails = types.ListNull(types.StringType)
-	case len(apiKey.AlertEmails) == 0:
-		plan.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
-	default:
-		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
-		resp.Diagnostics.Append(diags...)
+	// Handle rotation_policy from API.
+	// Only read back from the API when the user has rotation_policy in their config.
+	// When config is null, UseStateForUnknown already set the plan to the prior state
+	// value; overwriting it here with the API response would cause an inconsistent result.
+	// When config IS present and rotation_policy changed, ModifyPlan already marked
+	// next_rotation_at Unknown, so returning the API-recomputed date is accepted.
+	if !config.RotationPolicy.IsNull() {
+		rpObj, rpDiags := apiKeyRotationPolicyToTerraform(apiKey.RotationPolicy)
+		resp.Diagnostics.Append(rpDiags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		plan.AlertEmails = alertEmailsList
+		plan.RotationPolicy = rpObj
+	}
+	// else: plan.RotationPolicy retains the UseStateForUnknown value (prior state).
+
+	// Handle alert_emails from API.
+	// alert_emails is Optional (not Computed): only read back from the API when the
+	// user configured it; otherwise preserve the plan's null so the post-apply
+	// state matches the plan (UpdateAPIKey can return [] even when never set).
+	if !plan.AlertEmails.IsNull() {
+		switch {
+		case apiKey.AlertEmails == nil:
+			plan.AlertEmails = types.ListNull(types.StringType)
+		case len(apiKey.AlertEmails) == 0:
+			plan.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
+		default:
+			alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			plan.AlertEmails = alertEmailsList
+		}
 	}
 
 	diags = resp.State.Set(ctx, plan)

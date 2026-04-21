@@ -348,6 +348,9 @@ func apiKeyUsageLimitsToTerraform(ul *client.UsageLimits) (types.Object, diag.Di
 		attrs["type"] = types.StringValue(ul.Type)
 	}
 	if ul.CreditLimit != nil {
+		// The API spec defines credit_limit as float, but the Terraform schema uses
+		// Int64 to avoid a breaking state change. Truncate — in practice the API
+		// returns whole numbers matching what the user originally set.
 		attrs["credit_limit"] = types.Int64Value(int64(*ul.CreditLimit))
 	}
 	if ul.AlertThreshold != nil {
@@ -414,14 +417,14 @@ func terraformToAPIKeyUsageLimits(obj types.Object) *client.UsageLimits {
 	}
 	if v, ok := attrs["credit_limit"]; ok && !v.IsNull() && !v.IsUnknown() {
 		if i64Val, ok := v.(types.Int64); ok {
-			i := int(i64Val.ValueInt64())
-			ul.CreditLimit = &i
+			f := float64(i64Val.ValueInt64())
+			ul.CreditLimit = &f
 		}
 	}
 	if v, ok := attrs["alert_threshold"]; ok && !v.IsNull() && !v.IsUnknown() {
 		if i64Val, ok := v.(types.Int64); ok {
-			i := int(i64Val.ValueInt64())
-			ul.AlertThreshold = &i
+			f := float64(i64Val.ValueInt64())
+			ul.AlertThreshold = &f
 		}
 	}
 	if v, ok := attrs["periodic_reset"]; ok && !v.IsNull() && !v.IsUnknown() {

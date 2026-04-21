@@ -112,24 +112,36 @@ func (d *apiKeysDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 							Computed:    true,
 							ElementType: types.StringType,
 						},
-						"usage_limits": schema.SingleNestedAttribute{
-							Description: "Usage limits for this API key.",
-							Computed:    true,
-							Attributes: map[string]schema.Attribute{
-								"credit_limit": schema.Int64Attribute{
-									Description: "The credit limit value.",
-									Computed:    true,
-								},
-								"alert_threshold": schema.Int64Attribute{
-									Description: "Alert threshold in dollars.",
-									Computed:    true,
-								},
-								"periodic_reset": schema.StringAttribute{
-									Description: "When to reset the usage: 'monthly' or 'weekly'.",
-									Computed:    true,
-								},
+					"usage_limits": schema.SingleNestedAttribute{
+						Description: "Usage limits for this API key.",
+						Computed:    true,
+						Attributes: map[string]schema.Attribute{
+							"credit_limit": schema.Int64Attribute{
+								Description: "The credit limit value.",
+								Computed:    true,
+							},
+							"alert_threshold": schema.Int64Attribute{
+								Description: "Alert threshold in dollars.",
+								Computed:    true,
+							},
+							"periodic_reset": schema.StringAttribute{
+								Description: "When to reset the usage: 'monthly' or 'weekly'.",
+								Computed:    true,
+							},
+							"type": schema.StringAttribute{
+								Description: "Usage limit type (e.g. 'cost', 'requests').",
+								Computed:    true,
+							},
+							"next_usage_reset_at": schema.StringAttribute{
+								Description: "Timestamp when the usage counters will next be reset.",
+								Computed:    true,
+							},
+							"periodic_reset_days": schema.Int64Attribute{
+								Description: "Custom reset interval in days (1-365). Used when periodic_reset is 'custom'.",
+								Computed:    true,
 							},
 						},
+					},
 						"rate_limits": schema.ListNestedAttribute{
 							Description: "Rate limits for this API key.",
 							Computed:    true,

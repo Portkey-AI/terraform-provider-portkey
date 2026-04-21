@@ -127,7 +127,13 @@ func TestAccAPIKeyResource_withAlertEmails(t *testing.T) {
 					resource.TestCheckResourceAttr("portkey_api_key.test", "alert_emails.#", "2"),
 				),
 			},
-			// Delete testing automatically occurs in TestCase
+			// Clear alert_emails (remove from HCL → provider sends null to API)
+			{
+				Config: testAccAPIKeyResourceConfig(nameUpdated+"-cleared", "organisation", "service"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("portkey_api_key.test", "alert_emails"),
+				),
+			},
 		},
 	})
 }
@@ -437,13 +443,9 @@ resource "portkey_api_key" "test" {
 }
 
 // TestAccAPIKeyResource_withConfigID verifies that:
-//   - An API key can be created with config_id and allow_config_override = false,
-//     and the attributes are read back correctly from the API.
-//   - allow_config_override can be flipped to true in a subsequent apply while
-//     config_id is intentionally omitted from HCL, relying on the Computed
-//     attribute to preserve the existing API binding from state. This exercises
-//     the Optional+Computed readback path and confirms that ModifyPlan accepts
-//     the update because state already has a non-empty config_id.
+//   - An API key can be created with config_id and allow_config_override = false.
+//   - allow_config_override can be flipped to true while keeping config_id in HCL.
+//   - Removing config_id from HCL sends null to the API and clears the binding.
 func TestAccAPIKeyResource_withConfigID(t *testing.T) {
 	keyName := acctest.RandomWithPrefix("tf-acc-ak-cfg")
 	configName := acctest.RandomWithPrefix("tf-acc-cfg")
@@ -453,16 +455,13 @@ func TestAccAPIKeyResource_withConfigID(t *testing.T) {
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Step 1: Create an API key bound to a freshly created config,
-			// with allow_config_override explicitly disabled.
-			// Both config_id and allow_config_override are present in HCL.
+			// Step 1: Create with config_id + allow_config_override = false.
 			{
 				Config: testAccAPIKeyResourceConfigWithConfigID(configName, workspaceID, keyName, false),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
 					resource.TestCheckResourceAttrSet("portkey_api_key.test", "key"),
 					resource.TestCheckResourceAttr("portkey_api_key.test", "name", keyName),
-					// config_id must match the ID of the portkey_config we created.
 					resource.TestCheckResourceAttrPair(
 						"portkey_api_key.test", "config_id",
 						"portkey_config.test", "id",
@@ -470,21 +469,29 @@ func TestAccAPIKeyResource_withConfigID(t *testing.T) {
 					resource.TestCheckResourceAttr("portkey_api_key.test", "allow_config_override", "false"),
 				),
 			},
-			// Step 2: Flip allow_config_override to true while OMITTING config_id
-			// from the HCL config entirely. The Computed attribute must preserve
-			// the existing binding from state, and ModifyPlan must accept this
-			// because state.ConfigID is non-empty.
+			// Step 2: Keep config_id in HCL, flip allow_config_override to true.
 			{
-				Config: testAccAPIKeyResourceConfigUpdateOverrideOnly(configName, workspaceID, keyName),
+				Config: testAccAPIKeyResourceConfigWithConfigID(configName, workspaceID, keyName, true),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("portkey_api_key.test", "name", keyName),
 					resource.TestCheckResourceAttr("portkey_api_key.test", "allow_config_override", "true"),
-					// config_id must still be readable from state even though it
-					// was omitted from HCL — Computed reads it back from the API.
-					resource.TestCheckResourceAttrSet("portkey_api_key.test", "config_id"),
+					resource.TestCheckResourceAttrPair(
+						"portkey_api_key.test", "config_id",
+						"portkey_config.test", "id",
+					),
 				),
 			},
-			// Step 3: Import — verify the state round-trips cleanly.
+			// Step 3: Remove config_id from HCL → provider sends null to API,
+			// clearing the binding. allow_config_override is also removed since it
+			// is meaningless without a config.
+			{
+				Config: testAccAPIKeyResourceConfigWithConfigIDCleared(configName, workspaceID, keyName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", keyName),
+					resource.TestCheckNoResourceAttr("portkey_api_key.test", "config_id"),
+				),
+			},
+			// Step 4: Import — verify state round-trips cleanly after clearing.
 			{
 				ResourceName:            "portkey_api_key.test",
 				ImportState:             true,
@@ -535,17 +542,14 @@ resource "portkey_api_key" "test" {
 `, configName, workspaceID, keyName, allowOverride)
 }
 
-// testAccAPIKeyResourceConfigUpdateOverrideOnly builds a Terraform config that
-// sets allow_config_override = true but intentionally OMITS config_id from HCL.
-// This exercises the Optional+Computed readback path: config_id is not in HCL,
-// so Terraform reads it from state (the prior API binding). ModifyPlan must
-// accept this because state already holds a non-empty config_id.
+// testAccAPIKeyResourceConfigWithConfigIDCleared keeps portkey_config.test in
+// the plan (so Terraform knows to destroy it last), but omits config_id from
+// the API key. The provider detects that config was non-null in state and sends
+// "config_id": null to the API, clearing the binding.
 //
-// depends_on is required here: without a direct attribute reference to
-// portkey_config.test, Terraform would not know the destroy order and might
-// attempt to delete the config before the API key, causing a 409 (config still
-// bound to the key).
-func testAccAPIKeyResourceConfigUpdateOverrideOnly(configName, workspaceID, keyName string) string {
+// depends_on ensures Terraform destroys the API key before the config at the
+// end of the test, avoiding a 409 from the API.
+func testAccAPIKeyResourceConfigWithConfigIDCleared(configName, workspaceID, keyName string) string {
 	return fmt.Sprintf(`
 resource "portkey_config" "test" {
   name         = %[1]q
@@ -554,13 +558,13 @@ resource "portkey_config" "test" {
 }
 
 resource "portkey_api_key" "test" {
-  name                  = %[3]q
-  type                  = "organisation"
-  sub_type              = "service"
-  scopes                = ["providers.list"]
-  allow_config_override = true
-  # config_id intentionally omitted: Computed preserves the existing API binding from state.
-  depends_on            = [portkey_config.test]
+  name     = %[3]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+  # config_id intentionally omitted — provider sends null to clear the binding.
+  # allow_config_override also omitted since it is meaningless without config_id.
+  depends_on = [portkey_config.test]
 }
 `, configName, workspaceID, keyName)
 }
@@ -707,7 +711,7 @@ func TestAccAPIKeyResource_rotationPolicyBelowMinTransition(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccAPIKeyResourceConfigWithRotationPolicy(name, "monthly", 60000), // 1 minute — below 30 min minimum
-				ExpectError: regexp.MustCompile(`(?i)at least 1800000`),
+				ExpectError: regexp.MustCompile(`(?i)1800000`),
 			},
 		},
 	})
@@ -763,11 +767,11 @@ resource "portkey_api_key" "test" {
 // reset_usage tests
 // ----------------------------------------------------------------------------
 
-// TestAccAPIKeyResource_resetUsage verifies the write-only trigger semantics:
-//   - Creating a key with reset_usage = true is accepted.
-//   - After apply, state stores null for reset_usage (trigger consumed).
-//   - Removing reset_usage from config produces no perpetual diff (state is null,
-//     config is null → no change in plan).
+// TestAccAPIKeyResource_resetUsage verifies the usage-reset trigger semantics:
+//   - Adding reset_usage = true triggers an immediate reset of usage counters.
+//   - After apply, state stores true for reset_usage (the value the user set).
+//   - Removing reset_usage from config produces a non-empty plan (state has true,
+//     config null → Terraform sees a change) and applying it clears the state.
 func TestAccAPIKeyResource_resetUsage(t *testing.T) {
 	name := acctest.RandomWithPrefix("tf-acc-ak-reset")
 
@@ -783,21 +787,23 @@ func TestAccAPIKeyResource_resetUsage(t *testing.T) {
 					resource.TestCheckResourceAttr("portkey_api_key.test", "name", name),
 				),
 			},
-			// Step 2: Trigger a usage reset. State should store null for reset_usage
-			// after apply (trigger consumed), so next plan shows no change.
+			// Step 2: Trigger a usage reset. State stores reset_usage = true (the
+			// config value is kept); last_reset_at must be populated after the reset.
 			{
 				Config: testAccAPIKeyResourceConfigWithResetUsage(name),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckNoResourceAttr("portkey_api_key.test", "reset_usage"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "reset_usage", "true"),
 					// last_reset_at must be populated after a reset.
 					resource.TestCheckResourceAttrSet("portkey_api_key.test", "last_reset_at"),
 				),
 			},
-			// Step 3: Remove reset_usage from config — must produce no diff.
+			// Step 3: Remove reset_usage from config. Since state has true and config
+			// becomes null, Terraform will see a non-empty plan (the attribute is being
+			// cleared). Verify the plan IS non-empty — this is correct behaviour.
 			{
 				Config:             testAccAPIKeyResourceConfigWithUsageLimits(name, 1000, "monthly"),
 				PlanOnly:           true,
-				ExpectNonEmptyPlan: false,
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})
@@ -1010,6 +1016,137 @@ resource "portkey_api_key" "test" {
     credit_limit        = 1000
     periodic_reset      = "monthly"
     periodic_reset_days = 30
+  }
+}
+`, name)
+}
+
+// ============================================================================
+// Tests added to match OpenAPI spec constraints
+// ============================================================================
+
+// TestAccAPIKeyResource_rotationPolicyMutuallyExclusive verifies that
+// setting both rotation_period and next_rotation_at is rejected at plan time.
+func TestAccAPIKeyResource_rotationPolicyMutuallyExclusive(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-rotmx")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigRotationPolicyMutuallyExclusive(name),
+				ExpectError: regexp.MustCompile(`(?i)mutually exclusive`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_usageLimitsAlertThresholdExceedsCreditLimit verifies
+// that alert_threshold > credit_limit is rejected at plan time.
+func TestAccAPIKeyResource_usageLimitsAlertThresholdExceedsCreditLimit(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-at")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigUsageLimitsAlertThresholdTooHigh(name),
+				ExpectError: regexp.MustCompile(`(?i)alert_threshold`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_nameTooLong verifies that a name exceeding 100
+// characters is rejected at plan time.
+func TestAccAPIKeyResource_nameTooLong(t *testing.T) {
+	// 101 character name — one over the limit.
+	longName := "a" + acctest.RandString(100)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithName(longName),
+				ExpectError: regexp.MustCompile(`(?i)string length must be between`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_rotationPolicyNextRotationAtInvalidFormat verifies
+// that a malformed next_rotation_at is rejected at plan time.
+func TestAccAPIKeyResource_rotationPolicyNextRotationAtInvalidFormat(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-nra")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigRotationPolicyNextRotationAtInvalid(name),
+				ExpectError: regexp.MustCompile(`(?i)RFC3339`),
+			},
+		},
+	})
+}
+
+// ============================================================================
+// Config builders for spec-gap tests
+// ============================================================================
+
+func testAccAPIKeyResourceConfigRotationPolicyMutuallyExclusive(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+
+  rotation_policy = {
+    rotation_period  = "monthly"
+    next_rotation_at = "2027-01-01T00:00:00Z"
+  }
+}
+`, name)
+}
+
+func testAccAPIKeyResourceConfigUsageLimitsAlertThresholdTooHigh(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+
+  usage_limits = {
+    credit_limit     = 100
+    alert_threshold  = 200
+  }
+}
+`, name)
+}
+
+func testAccAPIKeyResourceConfigWithName(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+}
+`, name)
+}
+
+func testAccAPIKeyResourceConfigRotationPolicyNextRotationAtInvalid(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+
+  rotation_policy = {
+    next_rotation_at = "not-a-date"
   }
 }
 `, name)

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -19,10 +20,10 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                 = &apiKeyResource{}
-	_ resource.ResourceWithConfigure    = &apiKeyResource{}
-	_ resource.ResourceWithImportState  = &apiKeyResource{}
-	_ resource.ResourceWithModifyPlan   = &apiKeyResource{}
+	_ resource.Resource                = &apiKeyResource{}
+	_ resource.ResourceWithConfigure   = &apiKeyResource{}
+	_ resource.ResourceWithImportState = &apiKeyResource{}
+	_ resource.ResourceWithModifyPlan  = &apiKeyResource{}
 )
 
 // NewAPIKeyResource is a helper function to simplify the provider implementation.
@@ -54,6 +55,10 @@ type apiKeyResourceModel struct {
 	AlertEmails         types.List   `tfsdk:"alert_emails"`
 	ConfigID            types.String `tfsdk:"config_id"`
 	AllowConfigOverride types.Bool   `tfsdk:"allow_config_override"`
+	ExpiresAt           types.String `tfsdk:"expires_at"`
+	LastResetAt         types.String `tfsdk:"last_reset_at"`
+	ResetUsage          types.Bool   `tfsdk:"reset_usage"`
+	RotationPolicy      types.Object `tfsdk:"rotation_policy"`
 	CreatedAt           types.String `tfsdk:"created_at"`
 	UpdatedAt           types.String `tfsdk:"updated_at"`
 }
@@ -207,20 +212,36 @@ API Key Types:
 				Optional:    true,
 				Computed:    true,
 				Attributes: map[string]schema.Attribute{
+					"type": schema.StringAttribute{
+						Description: "Limit type: 'tokens' to cap on token consumption, 'cost' to cap on dollar spend.",
+						Optional:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("tokens", "cost"),
+						},
+					},
 					"credit_limit": schema.Int64Attribute{
-						Description: "The credit limit value.",
+						Description: "The credit limit value (required when usage_limits is set).",
 						Optional:    true,
 					},
 					"alert_threshold": schema.Int64Attribute{
-						Description: "Alert threshold in dollars. Triggers email notification when usage reaches this amount.",
+						Description: "Alert threshold. Triggers email notification when usage reaches this amount.",
 						Optional:    true,
 					},
 					"periodic_reset": schema.StringAttribute{
-						Description: "When to reset the usage: 'monthly' or 'weekly'.",
+						Description: "When to reset the usage counter: 'monthly' or 'weekly'.",
 						Optional:    true,
 						Validators: []validator.String{
 							stringvalidator.OneOf("monthly", "weekly"),
 						},
+					},
+					"periodic_reset_days": schema.Int64Attribute{
+						Description: "Custom reset interval in days (1–365). Alternative to periodic_reset for non-standard cadences.",
+						Optional:    true,
+					},
+					"next_usage_reset_at": schema.StringAttribute{
+						Description: "ISO8601 datetime for the next scheduled usage reset. Optional override; computed by the API when periodic_reset is set.",
+						Optional:    true,
+						Computed:    true,
 					},
 				},
 			},
@@ -238,10 +259,10 @@ API Key Types:
 							},
 						},
 						"unit": schema.StringAttribute{
-							Description: "Rate limit unit: 'rpm' (per minute), 'rph' (per hour), or 'rpd' (per day).",
+							Description: "Rate limit unit: 'rpm' (per minute), 'rph' (per hour), 'rpd' (per day), 'rps' (per second), 'rpw' (per week).",
 							Required:    true,
 							Validators: []validator.String{
-								stringvalidator.OneOf("rpm", "rph", "rpd"),
+								stringvalidator.OneOf("rpm", "rph", "rpd", "rps", "rpw"),
 							},
 						},
 						"value": schema.Int64Attribute{
@@ -283,6 +304,53 @@ API Key Types:
 				Computed: true,
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"expires_at": schema.StringAttribute{
+				Description: "RFC3339 datetime when this API key expires (e.g. \"2026-12-31T23:59:59Z\"). " +
+					"Can be set on create or updated later. Omit to create a non-expiring key. " +
+					"Note: clearing this field in Terraform after it has been set will not remove the expiry from the API — use the Portkey API directly to unset it.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"last_reset_at": schema.StringAttribute{
+				Description: "Timestamp when this API key's usage counters were last reset. Managed by the API; read-only.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"reset_usage": schema.BoolAttribute{
+				Description: "Set to true to trigger an immediate reset of this key's usage counters on the next apply. " +
+					"This is a one-shot trigger: after the reset is performed the state is set back to null, " +
+					"so the next plan will show a change again only if you keep reset_usage = true in your config. " +
+					"Remove or set to false to stop triggering resets.",
+				Optional: true,
+			},
+			"rotation_policy": schema.SingleNestedAttribute{
+				Description: "Automatic key rotation policy. When set, Portkey will rotate this key on the configured schedule.",
+				Optional:    true,
+				Computed:    true,
+				Attributes: map[string]schema.Attribute{
+					"rotation_period": schema.StringAttribute{
+						Description: "How often to rotate the key: 'weekly' or 'monthly'.",
+						Optional:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("weekly", "monthly"),
+						},
+					},
+					"next_rotation_at": schema.StringAttribute{
+						Description: "ISO8601 datetime of the next scheduled rotation. Computed by the API; can be overridden.",
+						Optional:    true,
+						Computed:    true,
+					},
+					"key_transition_period_ms": schema.Int64Attribute{
+						Description: "How long (in milliseconds) both the old and new keys remain valid after rotation. Minimum 1800000 (30 minutes).",
+						Optional:    true,
+					},
 				},
 			},
 			"created_at": schema.StringAttribute{
@@ -427,6 +495,16 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		createReq.AlertEmails = alertEmails
 	}
 
+	// Handle expires_at
+	if !plan.ExpiresAt.IsNull() && !plan.ExpiresAt.IsUnknown() {
+		createReq.ExpiresAt = plan.ExpiresAt.ValueString()
+	}
+
+	// Handle rotation_policy
+	if !plan.RotationPolicy.IsNull() && !plan.RotationPolicy.IsUnknown() {
+		createReq.RotationPolicy = terraformToAPIKeyRotationPolicy(plan.RotationPolicy)
+	}
+
 	// Create API key
 	createResp, err := r.client.CreateAPIKey(ctx, keyType, subType, createReq)
 	if err != nil {
@@ -516,12 +594,35 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		plan.ConfigID = types.StringNull()
 	}
 
-	// Handle allow_config_override from API
-	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
-		plan.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	// Handle allow_config_override from API.
+	// The API returns this as a top-level integer (null/0/1), not inside defaults.
+	if apiKey.AllowConfigOverride != nil {
+		plan.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
 	} else {
 		plan.AllowConfigOverride = types.BoolNull()
 	}
+
+	// Handle expires_at from API
+	if apiKey.ExpiresAt != nil {
+		plan.ExpiresAt = types.StringValue(apiKey.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		plan.ExpiresAt = types.StringNull()
+	}
+
+	// Handle last_reset_at from API (read-only)
+	if apiKey.LastResetAt != nil {
+		plan.LastResetAt = types.StringValue(apiKey.LastResetAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		plan.LastResetAt = types.StringNull()
+	}
+
+	// Handle rotation_policy from API
+	rpObj, rpDiags := apiKeyRotationPolicyToTerraform(apiKey.RotationPolicy)
+	resp.Diagnostics.Append(rpDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.RotationPolicy = rpObj
 
 	// Handle alert_emails from API
 	if len(apiKey.AlertEmails) > 0 {
@@ -534,6 +635,9 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	} else if plan.AlertEmails.IsNull() {
 		plan.AlertEmails = types.ListNull(types.StringType)
 	}
+
+	// reset_usage is a write-only trigger not returned by the API; always null in state.
+	plan.ResetUsage = types.BoolNull()
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -646,12 +750,35 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		state.ConfigID = types.StringNull()
 	}
 
-	// Handle allow_config_override from API
-	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
-		state.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	// Handle allow_config_override from API.
+	// The API returns this as a top-level integer (null/0/1), not inside defaults.
+	if apiKey.AllowConfigOverride != nil {
+		state.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
 	} else {
 		state.AllowConfigOverride = types.BoolNull()
 	}
+
+	// Handle expires_at from API
+	if apiKey.ExpiresAt != nil {
+		state.ExpiresAt = types.StringValue(apiKey.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		state.ExpiresAt = types.StringNull()
+	}
+
+	// Handle last_reset_at from API (read-only)
+	if apiKey.LastResetAt != nil {
+		state.LastResetAt = types.StringValue(apiKey.LastResetAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		state.LastResetAt = types.StringNull()
+	}
+
+	// Handle rotation_policy from API
+	rpObj, rpDiags := apiKeyRotationPolicyToTerraform(apiKey.RotationPolicy)
+	resp.Diagnostics.Append(rpDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.RotationPolicy = rpObj
 
 	// Handle alert_emails from API
 	if len(apiKey.AlertEmails) > 0 {
@@ -669,6 +796,9 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if !apiKey.UpdatedAt.IsZero() {
 		state.UpdatedAt = types.StringValue(apiKey.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	}
+
+	// reset_usage is a write-only trigger not returned by the API; always null in state.
+	state.ResetUsage = types.BoolNull()
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
@@ -792,6 +922,32 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	// Handle rate_limits — same approach
 	updateReq.RateLimits = marshalAPIKeyRateLimitsForUpdate(config.RateLimits)
 
+	// Handle rotation_policy
+	if !config.RotationPolicy.IsNull() && !config.RotationPolicy.IsUnknown() {
+		updateReq.RotationPolicy = terraformToAPIKeyRotationPolicy(config.RotationPolicy)
+	}
+
+	// Handle expires_at: send an updated value when the user changes it in HCL.
+	// When the user omits it (config is null) and there is an existing value in state,
+	// we leave updateReq.ExpiresAt nil so the API preserves the server-side value.
+	// To clear an expiry, use the Portkey API directly (Terraform cannot distinguish
+	// "user set null" from "user omitted the field" for Optional+Computed attributes).
+	if !config.ExpiresAt.IsNull() && !config.ExpiresAt.IsUnknown() {
+		// User explicitly set a new expiry datetime.
+		data, err := json.Marshal(config.ExpiresAt.ValueString())
+		if err == nil {
+			updateReq.ExpiresAt = data
+		}
+	}
+
+	// Handle reset_usage: if the user set it to true, trigger a usage counter reset.
+	// This is a write-only trigger — the API does not return this field, so it is
+	// always stored as null in state after apply.
+	if !config.ResetUsage.IsNull() && !config.ResetUsage.IsUnknown() && config.ResetUsage.ValueBool() {
+		v := true
+		updateReq.ResetUsage = &v
+	}
+
 	// Handle alert_emails
 	if !plan.AlertEmails.IsNull() && !plan.AlertEmails.IsUnknown() {
 		var alertEmails []string
@@ -879,12 +1035,38 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		plan.ConfigID = types.StringNull()
 	}
 
-	// Handle allow_config_override from API
-	if apiKey.Defaults != nil && apiKey.Defaults.AllowConfigOverride != nil {
-		plan.AllowConfigOverride = types.BoolValue(*apiKey.Defaults.AllowConfigOverride)
+	// Handle allow_config_override from API.
+	// The API returns this as a top-level integer (null/0/1), not inside defaults.
+	if apiKey.AllowConfigOverride != nil {
+		plan.AllowConfigOverride = types.BoolValue(*apiKey.AllowConfigOverride != 0)
 	} else {
 		plan.AllowConfigOverride = types.BoolNull()
 	}
+
+	// Handle expires_at from API
+	if apiKey.ExpiresAt != nil {
+		plan.ExpiresAt = types.StringValue(apiKey.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		plan.ExpiresAt = types.StringNull()
+	}
+
+	// Handle last_reset_at from API (read-only; updated when reset_usage was triggered)
+	if apiKey.LastResetAt != nil {
+		plan.LastResetAt = types.StringValue(apiKey.LastResetAt.Format("2006-01-02T15:04:05Z07:00"))
+	} else {
+		plan.LastResetAt = types.StringNull()
+	}
+
+	// reset_usage is a write-only trigger not returned by the API; consume it after apply.
+	plan.ResetUsage = types.BoolNull()
+
+	// Handle rotation_policy from API
+	rpObj, rpDiags := apiKeyRotationPolicyToTerraform(apiKey.RotationPolicy)
+	resp.Diagnostics.Append(rpDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.RotationPolicy = rpObj
 
 	// Handle alert_emails from API
 	if len(apiKey.AlertEmails) > 0 {

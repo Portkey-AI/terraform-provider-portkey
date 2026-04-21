@@ -654,16 +654,21 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	plan.RateLimits = rlList
 
-	// Handle metadata from API
-	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+	// Handle metadata from API.
+	// Distinguish nil (field absent in API response → keep null) from non-nil empty
+	// (API returned {} → store an empty map so `metadata = {}` in HCL produces no diff).
+	switch {
+	case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
+		plan.Metadata = types.MapNull(types.StringType)
+	case len(apiKey.Defaults.Metadata) == 0:
+		plan.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
+	default:
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		plan.Metadata = metadataMap
-	} else {
-		plan.Metadata = types.MapNull(types.StringType)
 	}
 
 	// Handle config_id from API
@@ -703,16 +708,21 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	plan.RotationPolicy = rpObj
 
-	// Handle alert_emails from API — always normalize to avoid Unknown in state.
-	if len(apiKey.AlertEmails) > 0 {
+	// Handle alert_emails from API.
+	// Distinguish nil (field absent → null) from non-nil empty (API returned [] →
+	// empty list) so that `alert_emails = []` in HCL produces no perpetual diff.
+	switch {
+	case apiKey.AlertEmails == nil:
+		plan.AlertEmails = types.ListNull(types.StringType)
+	case len(apiKey.AlertEmails) == 0:
+		plan.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
+	default:
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		plan.AlertEmails = alertEmailsList
-	} else {
-		plan.AlertEmails = types.ListNull(types.StringType)
 	}
 
 	// reset_usage is a write-only trigger not returned by the API; always null in state.
@@ -812,16 +822,21 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 	state.RateLimits = rlList
 
-	// Handle metadata from API
-	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+	// Handle metadata from API.
+	// Distinguish nil (field absent → null) from non-nil empty (API returned {} →
+	// empty map) so that `metadata = {}` in HCL produces no perpetual diff.
+	switch {
+	case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
+		state.Metadata = types.MapNull(types.StringType)
+	case len(apiKey.Defaults.Metadata) == 0:
+		state.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
+	default:
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		state.Metadata = metadataMap
-	} else {
-		state.Metadata = types.MapNull(types.StringType)
 	}
 
 	// Handle config_id from API
@@ -861,16 +876,21 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 	state.RotationPolicy = rpObj
 
-	// Handle alert_emails from API
-	if len(apiKey.AlertEmails) > 0 {
+	// Handle alert_emails from API.
+	// Distinguish nil (field absent → null) from non-nil empty (API returned [] →
+	// empty list) so that `alert_emails = []` in HCL produces no perpetual diff.
+	switch {
+	case apiKey.AlertEmails == nil:
+		state.AlertEmails = types.ListNull(types.StringType)
+	case len(apiKey.AlertEmails) == 0:
+		state.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
+	default:
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		state.AlertEmails = alertEmailsList
-	} else {
-		state.AlertEmails = types.ListNull(types.StringType)
 	}
 
 	state.CreatedAt = types.StringValue(apiKey.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
@@ -1118,16 +1138,21 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 		plan.RateLimits = rlList
 	}
 
-	// Handle metadata from API
-	if apiKey.Defaults != nil && len(apiKey.Defaults.Metadata) > 0 {
+	// Handle metadata from API.
+	// Distinguish nil (field absent → null) from non-nil empty (API returned {} →
+	// empty map) so that `metadata = {}` in HCL produces no perpetual diff.
+	switch {
+	case apiKey.Defaults == nil || apiKey.Defaults.Metadata == nil:
+		plan.Metadata = types.MapNull(types.StringType)
+	case len(apiKey.Defaults.Metadata) == 0:
+		plan.Metadata = types.MapValueMust(types.StringType, map[string]attr.Value{})
+	default:
 		metadataMap, diags := types.MapValueFrom(ctx, types.StringType, apiKey.Defaults.Metadata)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		plan.Metadata = metadataMap
-	} else if plan.Metadata.IsNull() {
-		plan.Metadata = types.MapNull(types.StringType)
 	}
 
 	// Handle config_id from API — always reflect the actual API state so that
@@ -1171,16 +1196,21 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 	plan.RotationPolicy = rpObj
 
-	// Handle alert_emails from API — always normalize to avoid Unknown in state.
-	if len(apiKey.AlertEmails) > 0 {
+	// Handle alert_emails from API.
+	// Distinguish nil (field absent → null) from non-nil empty (API returned [] →
+	// empty list) so that `alert_emails = []` in HCL produces no perpetual diff.
+	switch {
+	case apiKey.AlertEmails == nil:
+		plan.AlertEmails = types.ListNull(types.StringType)
+	case len(apiKey.AlertEmails) == 0:
+		plan.AlertEmails = types.ListValueMust(types.StringType, []attr.Value{})
+	default:
 		alertEmailsList, diags := types.ListValueFrom(ctx, types.StringType, apiKey.AlertEmails)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
 		plan.AlertEmails = alertEmailsList
-	} else {
-		plan.AlertEmails = types.ListNull(types.StringType)
 	}
 
 	diags = resp.State.Set(ctx, plan)

@@ -105,12 +105,6 @@ terraform {
 provider "portkey" {
   # API key read from PORTKEY_API_KEY environment variable
 }
-
-# Create a workspace
-resource "portkey_workspace" "production" {
-  name        = "Production"
-  description = "Production environment workspace"
-}
 ```
 
 ### Complete AI Gateway Setup
@@ -432,6 +426,10 @@ resource "portkey_integration" "azure_openai" {
 **Multiple Deployments Example (API Key Auth):**
 
 ```hcl
+resource "portkey_workspace" "production" {
+  name        = "Production"
+  description = "Production environment workspace"
+}
 resource "portkey_integration" "azure_openai_multi" {
   name           = "Azure OpenAI Multi-Model"
   ai_provider_id = "azure-openai"
@@ -650,15 +648,57 @@ Manages request rate limiting.
 
 #### `portkey_api_key`
 
-Manages Portkey API keys.
+Manages Portkey API keys (organization-scoped or workspace-scoped).
+
+**Arguments**
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
-| `name` | String | Yes | Name of the API key |
+| `name` | String | Yes | Human-readable name |
 | `type` | String | Yes | `organisation` or `workspace` |
 | `sub_type` | String | Yes | `service` or `user` |
-| `workspace_id` | String | No | Required for workspace keys |
-| `scopes` | List | Yes | API scopes |
+| `workspace_id` | String | No | Required for `type = "workspace"` keys |
+| `user_id` | String | No | Required for `sub_type = "user"` keys |
+| `description` | String | No | Optional description |
+| `scopes` | List(String) | No | Permission scopes |
+| `metadata` | Map(String) | No | Custom string metadata attached to every request |
+| `alert_emails` | List(String) | No | Emails to notify on usage alerts |
+| `config_id` | String | No | ID of a Portkey config to bind as the default for all requests |
+| `allow_config_override` | Bool | No | Allow callers to override `config_id` at request time (default `true`) |
+| `expires_at` | String | No | RFC3339 datetime when this key expires; can be updated after creation |
+| `reset_usage` | Bool | No | Set `true` to trigger an immediate usage counter reset (write-only trigger) |
+| `usage_limits` | Object | No | See [usage_limits](#usage_limits) below |
+| `rate_limits` | List(Object) | No | See [rate_limits](#rate_limits) below |
+| `rotation_policy` | Object | No | See [rotation_policy](#rotation_policy) below |
+
+**`usage_limits` nested object**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `credit_limit` | Number | Yes (if block present) | Maximum credits (tokens or cost units) |
+| `type` | String | No | `tokens` or `cost` — what the limit counts |
+| `alert_threshold` | Number | No | Trigger alert emails at this usage level |
+| `periodic_reset` | String | No | Reset cadence: `monthly` or `weekly` |
+| `periodic_reset_days` | Number | No | Custom reset interval in days (1–365); alternative to `periodic_reset` |
+| `next_usage_reset_at` | String | No/Computed | ISO8601 datetime for the next scheduled reset |
+
+**`rate_limits` nested object** (list)
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | String | Yes | `requests` or `tokens` |
+| `unit` | String | Yes | `rpm`, `rph`, `rpd`, `rps`, `rpw` |
+| `value` | Number | Yes | Limit value |
+
+**`rotation_policy` nested object**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `rotation_period` | String | No | `weekly` or `monthly` |
+| `next_rotation_at` | String | No/Computed | ISO8601 datetime for the next scheduled rotation; computed by the API |
+| `key_transition_period_ms` | Number | No | Overlap window in ms after rotation during which both old and new keys are valid (minimum 1800000 — 30 min) |
+
+**Read-only attributes**: `id`, `key` (sensitive), `organisation_id`, `status`, `created_at`, `updated_at`, `last_reset_at`
 
 **Import**: `terraform import portkey_api_key.example api-key-id`
 
@@ -842,6 +882,146 @@ resource "portkey_api_key" "backend" {
 ```
 
 **Common error**: `502 Bad Gateway` - No scopes provided. Always include at least one scope.
+
+#### Adding Usage Limits and Rate Limits
+
+```hcl
+resource "portkey_api_key" "controlled" {
+  name         = "Budget-Controlled Key"
+  type         = "workspace"
+  sub_type     = "service"
+  workspace_id = portkey_workspace.production.id
+  scopes       = ["completions.write", "providers.list"]
+
+  usage_limits = {
+    type            = "tokens"      # count tokens (or "cost" for dollar spend)
+    credit_limit    = 1000000       # 1M tokens
+    alert_threshold = 800000        # email alert at 800K
+    periodic_reset  = "monthly"     # auto-reset every month
+  }
+
+  rate_limits = [
+    {
+      type  = "requests"
+      unit  = "rpm"    # requests per minute (also: rph, rpd, rps, rpw)
+      value = 500
+    }
+  ]
+
+  alert_emails = ["platform-team@example.com"]
+}
+```
+
+To clear limits, remove the `usage_limits` or `rate_limits` block and re-apply. The provider sends a `null` to the API which clears the limits.
+
+#### Adding a Rotation Policy
+
+A rotation policy tells Portkey to automatically rotate this key on a schedule. After rotation, both the old and new key remain valid for `key_transition_period_ms` milliseconds so in-flight requests are not disrupted.
+
+```hcl
+resource "portkey_api_key" "rotating" {
+  name         = "Auto-Rotating Service Key"
+  type         = "workspace"
+  sub_type     = "service"
+  workspace_id = portkey_workspace.production.id
+  scopes       = ["completions.write", "providers.list"]
+
+  rotation_policy = {
+    rotation_period          = "monthly"
+    key_transition_period_ms = 3600000  # 1 hour overlap (minimum is 1800000 = 30 min)
+  }
+}
+```
+
+You can also set a specific `next_rotation_at` datetime to control exactly when the first rotation fires:
+
+```hcl
+  rotation_policy = {
+    rotation_period          = "weekly"
+    next_rotation_at         = "2026-05-01T00:00:00Z"
+    key_transition_period_ms = 1800000  # 30 min minimum
+  }
+```
+
+`next_rotation_at` is computed by the API after the first rotation, so Terraform will read it back automatically on subsequent plans.
+
+#### Combining Expiry with a Rotation Policy
+
+```hcl
+resource "portkey_api_key" "short_lived" {
+  name         = "Short-Lived Key"
+  type         = "workspace"
+  sub_type     = "service"
+  workspace_id = portkey_workspace.production.id
+  scopes       = ["completions.write"]
+
+  # Hard expiry — key is invalidated after this date regardless of rotation
+  expires_at = "2026-12-31T23:59:59Z"
+
+  rotation_policy = {
+    rotation_period          = "monthly"
+    key_transition_period_ms = 3600000
+  }
+}
+```
+
+`expires_at` can be updated after creation — change the value and re-apply without destroying the key. To create a non-expiring key, simply omit the field.
+
+#### Updating an API Key
+
+All mutable fields can be updated in-place with `terraform apply` — no destroy/recreate is required (except for `type`, `sub_type`, `workspace_id`, and `user_id` which force replacement):
+
+```hcl
+resource "portkey_api_key" "backend" {
+  name        = "Backend Service — updated name"   # update name
+  type        = "workspace"
+  sub_type    = "service"
+  workspace_id = portkey_workspace.production.id
+  scopes       = ["completions.write", "providers.list", "logs.view"]  # add scope
+
+  # Bind to a config after the fact
+  config_id             = portkey_config.routing.id
+  allow_config_override = false   # lock callers to this config
+
+  # Extend the expiry
+  expires_at = "2027-06-30T23:59:59Z"
+
+  usage_limits = {
+    credit_limit = 2000000   # increase limit
+    periodic_reset = "monthly"
+  }
+
+  rotation_policy = {
+    rotation_period          = "monthly"
+    key_transition_period_ms = 3600000
+  }
+}
+```
+
+#### Resetting Usage Counters
+
+To immediately reset a key's usage counters without waiting for the next scheduled reset, set `reset_usage = true` and apply:
+
+```hcl
+resource "portkey_api_key" "backend" {
+  name         = "Backend Service"
+  type         = "workspace"
+  sub_type     = "service"
+  workspace_id = portkey_workspace.production.id
+  scopes       = ["completions.write"]
+
+  usage_limits = {
+    credit_limit   = 1000000
+    periodic_reset = "monthly"
+  }
+
+  reset_usage = true   # triggers immediate counter reset on next apply
+}
+```
+
+`reset_usage` is a **write-only trigger** — it is never stored in Terraform state. After the reset is performed, state records `null` for this field. If you leave `reset_usage = true` in your config, the next `terraform plan` will show it as a pending change and every subsequent `apply` will reset the counters again. Remove the line (or set `reset_usage = false`) once the reset is done.
+
+After a reset, `last_reset_at` (a read-only attribute) is updated by the API and will be visible in your state.
 
 ### `portkey_guardrail`, `portkey_usage_limits_policy`, `portkey_rate_limits_policy`
 

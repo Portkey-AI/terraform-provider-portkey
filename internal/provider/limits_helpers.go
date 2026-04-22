@@ -304,9 +304,12 @@ func marshalAPIKeyRateLimitsForUpdate(list types.List) json.RawMessage {
 // Type definitions for API key nested attributes
 var (
 	apiKeyUsageLimitsAttrTypes = map[string]attr.Type{
-		"credit_limit":    types.Int64Type,
-		"alert_threshold": types.Int64Type,
-		"periodic_reset":  types.StringType,
+		"type":                types.StringType,
+		"credit_limit":        types.Int64Type,
+		"alert_threshold":     types.Int64Type,
+		"periodic_reset":      types.StringType,
+		"periodic_reset_days": types.Int64Type,
+		"next_usage_reset_at": types.StringType,
 	}
 
 	apiKeyRateLimitsAttrTypes = map[string]attr.Type{
@@ -316,6 +319,12 @@ var (
 	}
 
 	apiKeyRateLimitsObjectType = types.ObjectType{AttrTypes: apiKeyRateLimitsAttrTypes}
+
+	apiKeyRotationPolicyAttrTypes = map[string]attr.Type{
+		"rotation_period":          types.StringType,
+		"next_rotation_at":         types.StringType,
+		"key_transition_period_ms": types.Int64Type,
+	}
 )
 
 // apiKeyUsageLimitsToTerraform converts client *UsageLimits to a Terraform Object.
@@ -328,11 +337,20 @@ func apiKeyUsageLimitsToTerraform(ul *client.UsageLimits) (types.Object, diag.Di
 	}
 
 	attrs := map[string]attr.Value{
-		"credit_limit":    types.Int64Null(),
-		"alert_threshold": types.Int64Null(),
-		"periodic_reset":  types.StringNull(),
+		"type":                types.StringNull(),
+		"credit_limit":        types.Int64Null(),
+		"alert_threshold":     types.Int64Null(),
+		"periodic_reset":      types.StringNull(),
+		"periodic_reset_days": types.Int64Null(),
+		"next_usage_reset_at": types.StringNull(),
+	}
+	if ul.Type != "" {
+		attrs["type"] = types.StringValue(ul.Type)
 	}
 	if ul.CreditLimit != nil {
+		// The API spec defines credit_limit as float, but the Terraform schema uses
+		// Int64 to avoid a breaking state change. Truncate — in practice the API
+		// returns whole numbers matching what the user originally set.
 		attrs["credit_limit"] = types.Int64Value(int64(*ul.CreditLimit))
 	}
 	if ul.AlertThreshold != nil {
@@ -341,8 +359,43 @@ func apiKeyUsageLimitsToTerraform(ul *client.UsageLimits) (types.Object, diag.Di
 	if ul.PeriodicReset != "" {
 		attrs["periodic_reset"] = types.StringValue(ul.PeriodicReset)
 	}
+	if ul.PeriodicResetDays != nil {
+		attrs["periodic_reset_days"] = types.Int64Value(int64(*ul.PeriodicResetDays))
+	}
+	if ul.NextUsageResetAt != "" {
+		attrs["next_usage_reset_at"] = types.StringValue(ul.NextUsageResetAt)
+	}
 
 	obj, d := types.ObjectValue(apiKeyUsageLimitsAttrTypes, attrs)
+	diags.Append(d...)
+	return obj, diags
+}
+
+// apiKeyRotationPolicyToTerraform converts client *RotationPolicy to a Terraform Object.
+// Returns null object when the API returns nil (no rotation policy configured).
+func apiKeyRotationPolicyToTerraform(rp *client.RotationPolicy) (types.Object, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	if rp == nil {
+		return types.ObjectNull(apiKeyRotationPolicyAttrTypes), diags
+	}
+
+	attrs := map[string]attr.Value{
+		"rotation_period":          types.StringNull(),
+		"next_rotation_at":         types.StringNull(),
+		"key_transition_period_ms": types.Int64Null(),
+	}
+	if rp.RotationPeriod != "" {
+		attrs["rotation_period"] = types.StringValue(rp.RotationPeriod)
+	}
+	if rp.NextRotationAt != "" {
+		attrs["next_rotation_at"] = types.StringValue(rp.NextRotationAt)
+	}
+	if rp.KeyTransitionPeriodMs != nil {
+		attrs["key_transition_period_ms"] = types.Int64Value(int64(*rp.KeyTransitionPeriodMs))
+	}
+
+	obj, d := types.ObjectValue(apiKeyRotationPolicyAttrTypes, attrs)
 	diags.Append(d...)
 	return obj, diags
 }
@@ -355,26 +408,73 @@ func terraformToAPIKeyUsageLimits(obj types.Object) *client.UsageLimits {
 	}
 
 	ul := &client.UsageLimits{}
+	attrs := obj.Attributes()
 
-	if v, ok := obj.Attributes()["credit_limit"]; ok && !v.IsNull() && !v.IsUnknown() {
-		if i64Val, ok := v.(types.Int64); ok {
-			i := int(i64Val.ValueInt64())
-			ul.CreditLimit = &i
+	if v, ok := attrs["type"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if strVal, ok := v.(types.String); ok {
+			ul.Type = strVal.ValueString()
 		}
 	}
-	if v, ok := obj.Attributes()["alert_threshold"]; ok && !v.IsNull() && !v.IsUnknown() {
+	if v, ok := attrs["credit_limit"]; ok && !v.IsNull() && !v.IsUnknown() {
 		if i64Val, ok := v.(types.Int64); ok {
-			i := int(i64Val.ValueInt64())
-			ul.AlertThreshold = &i
+			f := float64(i64Val.ValueInt64())
+			ul.CreditLimit = &f
 		}
 	}
-	if v, ok := obj.Attributes()["periodic_reset"]; ok && !v.IsNull() && !v.IsUnknown() {
+	if v, ok := attrs["alert_threshold"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if i64Val, ok := v.(types.Int64); ok {
+			f := float64(i64Val.ValueInt64())
+			ul.AlertThreshold = &f
+		}
+	}
+	if v, ok := attrs["periodic_reset"]; ok && !v.IsNull() && !v.IsUnknown() {
 		if strVal, ok := v.(types.String); ok {
 			ul.PeriodicReset = strVal.ValueString()
 		}
 	}
+	if v, ok := attrs["periodic_reset_days"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if i64Val, ok := v.(types.Int64); ok {
+			i := int(i64Val.ValueInt64())
+			ul.PeriodicResetDays = &i
+		}
+	}
+	if v, ok := attrs["next_usage_reset_at"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if strVal, ok := v.(types.String); ok {
+			ul.NextUsageResetAt = strVal.ValueString()
+		}
+	}
 
 	return ul
+}
+
+// terraformToAPIKeyRotationPolicy converts a Terraform Object to client *RotationPolicy.
+// Returns nil when the object is null/unknown (no rotation policy to send).
+func terraformToAPIKeyRotationPolicy(obj types.Object) *client.RotationPolicy {
+	if obj.IsNull() || obj.IsUnknown() {
+		return nil
+	}
+
+	rp := &client.RotationPolicy{}
+	attrs := obj.Attributes()
+
+	if v, ok := attrs["rotation_period"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if strVal, ok := v.(types.String); ok {
+			rp.RotationPeriod = strVal.ValueString()
+		}
+	}
+	if v, ok := attrs["next_rotation_at"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if strVal, ok := v.(types.String); ok {
+			rp.NextRotationAt = strVal.ValueString()
+		}
+	}
+	if v, ok := attrs["key_transition_period_ms"]; ok && !v.IsNull() && !v.IsUnknown() {
+		if i64Val, ok := v.(types.Int64); ok {
+			i := int(i64Val.ValueInt64())
+			rp.KeyTransitionPeriodMs = &i
+		}
+	}
+
+	return rp
 }
 
 // apiKeyRateLimitsToTerraformList converts client []RateLimit to a Terraform List.

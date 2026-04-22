@@ -591,11 +591,22 @@ func (c *Client) DeleteIntegration(ctx context.Context, slug string) error {
 	return err
 }
 
-// APIKeyDefaults represents the defaults configuration for an API key
+// APIKeyDefaults represents the defaults configuration for an API key (used in Create requests).
 type APIKeyDefaults struct {
 	Metadata            map[string]string `json:"metadata,omitempty"`
 	ConfigID            string            `json:"config_id,omitempty"`
 	AllowConfigOverride *bool             `json:"allow_config_override,omitempty"`
+}
+
+// UpdateAPIKeyDefaults represents the defaults in an Update (PUT) request.
+// ConfigID uses json.RawMessage for three-state semantics:
+//   - nil:              field omitted → no change to the existing binding
+//   - client.JSONNull:  sends "config_id": null → removes the pinned config
+//   - marshaled string: sends the new config UUID
+type UpdateAPIKeyDefaults struct {
+	ConfigID            json.RawMessage   `json:"config_id,omitempty"`
+	AllowConfigOverride *bool             `json:"allow_config_override,omitempty"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
 }
 
 // APIKey represents a Portkey API key
@@ -615,9 +626,14 @@ type APIKey struct {
 	Scopes         []string        `json:"scopes,omitempty"`
 	Defaults       *APIKeyDefaults `json:"defaults,omitempty"`
 	AlertEmails    []string        `json:"alert_emails,omitempty"`
-	ExpiresAt      *time.Time      `json:"expires_at,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"last_updated_at"`
+	// AllowConfigOverride is returned as a top-level integer by the API (null/0/1),
+	// separate from the Defaults struct which is used only for write operations.
+	AllowConfigOverride *int            `json:"allow_config_override"`
+	ExpiresAt           *time.Time      `json:"expires_at,omitempty"`
+	LastResetAt         *time.Time      `json:"last_reset_at,omitempty"`
+	RotationPolicy      *RotationPolicy `json:"rotation_policy,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"last_updated_at"`
 }
 
 // RateLimit represents a rate limit configuration
@@ -628,25 +644,38 @@ type RateLimit struct {
 }
 
 // UsageLimits represents usage limit configuration for API keys.
-// Uses the same field names as workspace usage limits (credit_limit, periodic_reset, alert_threshold).
+// CreditLimit and AlertThreshold use float64 because the API spec defines them
+// as "number/float" — this avoids JSON unmarshal failures when the API returns
+// values like 10.0 (a float JSON literal that cannot be decoded into *int).
 type UsageLimits struct {
-	CreditLimit    *int   `json:"credit_limit,omitempty"`
-	AlertThreshold *int   `json:"alert_threshold,omitempty"`
-	PeriodicReset  string `json:"periodic_reset,omitempty"` // monthly, weekly
+	Type              string   `json:"type,omitempty"` // "tokens" or "cost"
+	CreditLimit       *float64 `json:"credit_limit,omitempty"`
+	AlertThreshold    *float64 `json:"alert_threshold,omitempty"`
+	PeriodicReset     string   `json:"periodic_reset,omitempty"`      // "monthly" or "weekly"
+	PeriodicResetDays *int     `json:"periodic_reset_days,omitempty"` // 1–365, alternative to PeriodicReset
+	NextUsageResetAt  string   `json:"next_usage_reset_at,omitempty"` // ISO8601 datetime
+}
+
+// RotationPolicy configures automatic API key rotation.
+type RotationPolicy struct {
+	RotationPeriod        string `json:"rotation_period,omitempty"`          // "weekly" or "monthly"
+	NextRotationAt        string `json:"next_rotation_at,omitempty"`         // ISO8601 datetime
+	KeyTransitionPeriodMs *int   `json:"key_transition_period_ms,omitempty"` // minimum 1800000 (30 min)
 }
 
 // CreateAPIKeyRequest represents the request to create an API key
 type CreateAPIKeyRequest struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	WorkspaceID string          `json:"workspace_id,omitempty"`
-	UserID      string          `json:"user_id,omitempty"` // Required for user sub-type
-	RateLimits  []RateLimit     `json:"rate_limits,omitempty"`
-	UsageLimits *UsageLimits    `json:"usage_limits,omitempty"`
-	Scopes      []string        `json:"scopes,omitempty"`
-	Defaults    *APIKeyDefaults `json:"defaults,omitempty"`
-	AlertEmails []string        `json:"alert_emails,omitempty"`
-	ExpiresAt   string          `json:"expires_at,omitempty"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description,omitempty"`
+	WorkspaceID    string          `json:"workspace_id,omitempty"`
+	UserID         string          `json:"user_id,omitempty"` // Required for user sub-type
+	RateLimits     []RateLimit     `json:"rate_limits,omitempty"`
+	UsageLimits    *UsageLimits    `json:"usage_limits,omitempty"`
+	Scopes         []string        `json:"scopes,omitempty"`
+	Defaults       *APIKeyDefaults `json:"defaults,omitempty"`
+	AlertEmails    []string        `json:"alert_emails,omitempty"`
+	ExpiresAt      string          `json:"expires_at,omitempty"`
+	RotationPolicy *RotationPolicy `json:"rotation_policy,omitempty"`
 }
 
 // CreateAPIKeyResponse represents the response from creating an API key
@@ -657,18 +686,26 @@ type CreateAPIKeyResponse struct {
 }
 
 // UpdateAPIKeyRequest represents the request to update an API key.
-// UsageLimits and RateLimits use json.RawMessage for three-state semantics:
-//   - nil: field omitted from JSON (no change to existing limits)
-//   - client.JSONNull: sends "usage_limits": null (clears limits)
-//   - marshaled JSON: sends the new limits object/array
+// All fields are optional — only send what you want to change.
+//
+// Fields using json.RawMessage support three-state semantics:
+//   - nil:             field omitted from JSON → no change to existing value
+//   - client.JSONNull: sends "field": null    → clears/removes the value
+//   - marshaled JSON:  sends the new value
 type UpdateAPIKeyRequest struct {
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
-	RateLimits  json.RawMessage `json:"rate_limits,omitempty"`
-	UsageLimits json.RawMessage `json:"usage_limits,omitempty"`
-	Scopes      []string        `json:"scopes,omitempty"`
-	Defaults    *APIKeyDefaults `json:"defaults,omitempty"`
-	AlertEmails []string        `json:"alert_emails,omitempty"`
+	Name        string                `json:"name,omitempty"`
+	Description string                `json:"description,omitempty"`
+	RateLimits  json.RawMessage       `json:"rate_limits,omitempty"`
+	UsageLimits json.RawMessage       `json:"usage_limits,omitempty"`
+	Scopes      []string              `json:"scopes,omitempty"`
+	Defaults    *UpdateAPIKeyDefaults `json:"defaults,omitempty"`
+	// AlertEmails is three-state: nil = no change, JSONNull = clear all emails, array = set new list.
+	AlertEmails json.RawMessage `json:"alert_emails,omitempty"`
+	// ExpiresAt is three-state: nil = no change, JSONNull = clear expiry, string = set new expiry.
+	ExpiresAt json.RawMessage `json:"expires_at,omitempty"`
+	// ResetUsage triggers a usage counter reset when true. Not persisted by the API.
+	ResetUsage     *bool           `json:"reset_usage,omitempty"`
+	RotationPolicy *RotationPolicy `json:"rotation_policy,omitempty"`
 }
 
 // CreateAPIKey creates a new API key

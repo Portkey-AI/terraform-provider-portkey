@@ -113,6 +113,18 @@ func (d *apiKeyDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 						Description: "When to reset the usage: 'monthly' or 'weekly'.",
 						Computed:    true,
 					},
+					"type": schema.StringAttribute{
+						Description: "Usage limit type (e.g. 'cost', 'requests').",
+						Computed:    true,
+					},
+					"next_usage_reset_at": schema.StringAttribute{
+						Description: "Timestamp when the usage counters will next be reset.",
+						Computed:    true,
+					},
+					"periodic_reset_days": schema.Int64Attribute{
+						Description: "Custom reset interval in days (1-365). Used when periodic_reset is 'custom'.",
+						Computed:    true,
+					},
 				},
 			},
 			"rate_limits": schema.ListNestedAttribute{

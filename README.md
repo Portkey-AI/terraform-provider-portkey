@@ -105,9 +105,6 @@ terraform {
 provider "portkey" {
   # API key read from PORTKEY_API_KEY environment variable
 }
-
-# Create a workspace
-
 ```
 
 ### Complete AI Gateway Setup
@@ -428,7 +425,8 @@ resource "portkey_integration" "azure_openai" {
 
 **Multiple Deployments Example (API Key Auth):**
 
-```hclresource "portkey_workspace" "production" {
+```hcl
+resource "portkey_workspace" "production" {
   name        = "Production"
   description = "Production environment workspace"
 }

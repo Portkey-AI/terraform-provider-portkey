@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
@@ -18,10 +23,26 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                = &integrationResource{}
-	_ resource.ResourceWithConfigure   = &integrationResource{}
-	_ resource.ResourceWithImportState = &integrationResource{}
+	_ resource.Resource                   = &integrationResource{}
+	_ resource.ResourceWithConfigure      = &integrationResource{}
+	_ resource.ResourceWithImportState    = &integrationResource{}
+	_ resource.ResourceWithValidateConfig = &integrationResource{}
 )
+
+// secretMappingAttrTypes is the shared object-type description for a
+// secret_mappings set element. Declared at package level so that the resource,
+// the data source, and helper converters agree on the exact shape.
+var secretMappingAttrTypes = map[string]attr.Type{
+	"target_field":        types.StringType,
+	"secret_reference_id": types.StringType,
+	"secret_key":          types.StringType,
+}
+
+// secretMappingTargetFieldRegex enforces the two legal shapes documented by
+// the Portkey API for Integration target fields: the bare "key" field or
+// "configurations.<field>" where <field> is an alphanumeric/underscore
+// identifier.
+var secretMappingTargetFieldRegex = regexp.MustCompile(`^(key|configurations\.[A-Za-z0-9_]+)$`)
 
 // NewIntegrationResource is a helper function to simplify the provider implementation.
 func NewIntegrationResource() resource.Resource {
@@ -46,6 +67,7 @@ type integrationResourceModel struct {
 	Description    types.String `tfsdk:"description"`
 	WorkspaceID    types.String `tfsdk:"workspace_id"`
 	AllowAllModels types.Bool   `tfsdk:"allow_all_models"`
+	SecretMappings types.Set    `tfsdk:"secret_mappings"`
 	Type           types.String `tfsdk:"type"`
 	Status         types.String `tfsdk:"status"`
 	CreatedAt      types.String `tfsdk:"created_at"`
@@ -126,6 +148,32 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(true),
+			},
+			"secret_mappings": schema.SetNestedAttribute{
+				Description: "Dynamically resolve credentials from a `portkey_secret_reference` at request time instead of storing them on the integration. Each mapping populates a single integration field (`key` or `configurations.<field>`) from the referenced secret. When a mapping with `target_field = \"key\"` is supplied, the `key`/`key_wo` body arguments can be omitted. Omitting this attribute preserves the previous (pre-upgrade) behaviour; set it to `[]` to clear all existing mappings.",
+				Optional:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"target_field": schema.StringAttribute{
+							Description: "Integration field to populate. Either `key` or `configurations.<field>` (e.g. `configurations.aws_secret_access_key`, `configurations.azure_entra_client_secret`). Must be unique within the set.",
+							Required:    true,
+							Validators: []validator.String{
+								stringvalidator.RegexMatches(
+									secretMappingTargetFieldRegex,
+									`must be "key" or "configurations.<field>" where <field> is alphanumeric/underscore`,
+								),
+							},
+						},
+						"secret_reference_id": schema.StringAttribute{
+							Description: "UUID or slug of the `portkey_secret_reference` whose value should populate `target_field` at request time. Must belong to the same organisation and be accessible by the workspace.",
+							Required:    true,
+						},
+						"secret_key": schema.StringAttribute{
+							Description: "Optional override for the secret reference's `secret_key`. Use to pick a specific field out of a multi-value (JSON) secret payload. When unset, the `secret_key` configured on the secret reference itself is used.",
+							Optional:    true,
+						},
+					},
+				},
 			},
 			"type": schema.StringAttribute{
 				Description: "Type of integration: 'organisation' for org-level integrations or 'workspace' for workspace-scoped integrations.",
@@ -252,6 +300,18 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 		createReq.WorkspaceID = plan.WorkspaceID.ValueString()
 	}
 
+	// Attach secret_mappings if the user supplied the attribute. A nil pointer
+	// omits the field from the wire payload entirely, which is the
+	// backward-compatible default for users who never opted in.
+	mappings, mapDiags := secretMappingsToClient(ctx, plan.SecretMappings)
+	resp.Diagnostics.Append(mapDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if mappings != nil {
+		createReq.SecretMappings = mappings
+	}
+
 	createResp, err := r.client.CreateIntegration(ctx, createReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -298,6 +358,16 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 			plan.WorkspaceID = types.StringNull()
 		}
 	}
+
+	// Refresh secret_mappings from the server response so state is faithful to
+	// the API's view. For users who never set the attribute, the helper keeps
+	// it null (avoiding a spurious null -> [] diff on the next plan).
+	newMappings, smDiags := secretMappingsFromClient(integration.SecretMappings, plan.SecretMappings)
+	resp.Diagnostics.Append(smDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.SecretMappings = newMappings
 
 	// Only call UpdateIntegrationModels when allow_all_models is false,
 	// since the API already defaults to true.
@@ -391,6 +461,15 @@ func (r *integrationResource) Read(ctx context.Context, req resource.ReadRequest
 			state.WorkspaceID = types.StringNull()
 		}
 	}
+
+	// Reflect server-side secret_mappings into state so drift shows up on the
+	// next plan if an out-of-band change was made via the UI or API.
+	newMappings, smDiags := secretMappingsFromClient(integration.SecretMappings, state.SecretMappings)
+	resp.Diagnostics.Append(smDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.SecretMappings = newMappings
 
 	// Read allow_all_models from the models endpoint
 	modelsResp, err := r.client.GetIntegrationModels(ctx, state.Slug.ValueString())
@@ -506,6 +585,28 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 		updateReq.Description = plan.Description.ValueString()
 	}
 
+	// Propagate secret_mappings. If the plan's value changed from the prior
+	// state, we must send the field so that the API reconciles (including
+	// clearing, which is why an explicit empty set emits an empty array).
+	// If the user never set the attribute, we leave the pointer nil and the
+	// field is omitted from the wire payload - preserving pre-upgrade
+	// behaviour.
+	if !plan.SecretMappings.Equal(state.SecretMappings) {
+		mappings, mapDiags := secretMappingsToClient(ctx, plan.SecretMappings)
+		resp.Diagnostics.Append(mapDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if mappings == nil {
+			// Plan transitioned from a populated set back to null. Send an
+			// explicit empty array so the API clears any existing mappings.
+			empty := []client.SecretMapping{}
+			updateReq.SecretMappings = &empty
+		} else {
+			updateReq.SecretMappings = mappings
+		}
+	}
+
 	integration, err := r.client.UpdateIntegration(ctx, state.Slug.ValueString(), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -548,6 +649,15 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 
 	// Preserve workspace_id from state (workspace_id is immutable, RequiresReplace)
 	plan.WorkspaceID = state.WorkspaceID
+
+	// Refresh secret_mappings from the PUT response to surface any
+	// server-side normalisation (e.g. slug vs. UUID resolution).
+	newMappings, smDiags := secretMappingsFromClient(integration.SecretMappings, plan.SecretMappings)
+	resp.Diagnostics.Append(smDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.SecretMappings = newMappings
 
 	// Read allow_all_models from the models endpoint
 	modelsResp, err := r.client.GetIntegrationModels(ctx, integration.Slug)
@@ -592,4 +702,138 @@ func (r *integrationResource) Delete(ctx context.Context, req resource.DeleteReq
 func (r *integrationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by slug
 	resource.ImportStatePassthroughID(ctx, path.Root("slug"), req, resp)
+}
+
+// ValidateConfig enforces cross-attribute invariants on secret_mappings that
+// the per-attribute validators cannot express: uniqueness of target_field
+// across the set. (Terraform set semantics only dedupe fully-identical
+// objects, so two mappings with the same target_field but different
+// secret_reference_id would otherwise slip through and be rejected by the
+// API.)
+func (r *integrationResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config integrationResourceModel
+	diags := req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if config.SecretMappings.IsNull() || config.SecretMappings.IsUnknown() {
+		return
+	}
+
+	var mappings []secretMappingModel
+	diags = config.SecretMappings.ElementsAs(ctx, &mappings, false)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	seen := make(map[string]int, len(mappings))
+	for i, m := range mappings {
+		if m.TargetField.IsNull() || m.TargetField.IsUnknown() {
+			continue
+		}
+		tf := m.TargetField.ValueString()
+		if prev, ok := seen[tf]; ok {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("secret_mappings"),
+				"Duplicate target_field in secret_mappings",
+				fmt.Sprintf("target_field %q appears on secret_mappings[%d] and secret_mappings[%d]. Each target_field may appear at most once.", tf, prev, i),
+			)
+			return
+		}
+		seen[tf] = i
+	}
+}
+
+// secretMappingModel is the tfsdk-facing representation of a single element
+// inside the secret_mappings set. It mirrors client.SecretMapping field-for-
+// field so we can freely convert between the two with tfsdk decoding.
+type secretMappingModel struct {
+	TargetField       types.String `tfsdk:"target_field"`
+	SecretReferenceID types.String `tfsdk:"secret_reference_id"`
+	SecretKey         types.String `tfsdk:"secret_key"`
+}
+
+// secretMappingsToClient projects a plan/state Set into the slice shape the
+// Portkey client expects.
+//
+// Return semantics are deliberate and relied upon by the caller when building
+// the request body:
+//   - (nil, diags)     - user did not supply the attribute (null or unknown);
+//     the request should omit the field entirely so existing mappings on the
+//     API side are preserved.
+//   - (&[]{}, diags)   - user explicitly supplied an empty set; the request
+//     should send an explicit empty array so the API clears all mappings.
+//   - (&[{...}], diags) - user supplied mappings; send them as-is.
+func secretMappingsToClient(ctx context.Context, set types.Set) (*[]client.SecretMapping, diag.Diagnostics) {
+	if set.IsNull() || set.IsUnknown() {
+		return nil, nil
+	}
+
+	var models []secretMappingModel
+	diags := set.ElementsAs(ctx, &models, false)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	out := make([]client.SecretMapping, 0, len(models))
+	for _, m := range models {
+		mapping := client.SecretMapping{
+			TargetField:       m.TargetField.ValueString(),
+			SecretReferenceID: m.SecretReferenceID.ValueString(),
+		}
+		if !m.SecretKey.IsNull() && !m.SecretKey.IsUnknown() {
+			v := m.SecretKey.ValueString()
+			mapping.SecretKey = &v
+		}
+		out = append(out, mapping)
+	}
+	return &out, diags
+}
+
+// secretMappingsFromClient converts the slice returned by the API back into
+// a types.Set suitable for state storage.
+//
+// The `prior` argument is the existing state value for the attribute. When
+// the API returns an empty/nil slice we preserve `prior` as-is: that way
+// users who never opted into secret_mappings keep a null value (no spurious
+// null->[] drift), and users who explicitly set secret_mappings = [] keep
+// their empty set.
+func secretMappingsFromClient(mappings []client.SecretMapping, prior types.Set) (types.Set, diag.Diagnostics) {
+	objType := types.ObjectType{AttrTypes: secretMappingAttrTypes}
+	var diags diag.Diagnostics
+
+	if len(mappings) == 0 {
+		if !prior.IsNull() && !prior.IsUnknown() {
+			return prior, diags
+		}
+		return types.SetNull(objType), diags
+	}
+
+	elems := make([]attr.Value, 0, len(mappings))
+	for _, m := range mappings {
+		attrs := map[string]attr.Value{
+			"target_field":        types.StringValue(m.TargetField),
+			"secret_reference_id": types.StringValue(m.SecretReferenceID),
+			"secret_key":          types.StringNull(),
+		}
+		if m.SecretKey != nil {
+			attrs["secret_key"] = types.StringValue(*m.SecretKey)
+		}
+		obj, d := types.ObjectValue(secretMappingAttrTypes, attrs)
+		diags.Append(d...)
+		if diags.HasError() {
+			return types.SetNull(objType), diags
+		}
+		elems = append(elems, obj)
+	}
+
+	setVal, d := types.SetValue(objType, elems)
+	diags.Append(d...)
+	if diags.HasError() {
+		return types.SetNull(objType), diags
+	}
+	return setVal, diags
 }

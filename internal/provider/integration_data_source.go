@@ -6,6 +6,7 @@ import (
 
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -29,14 +30,15 @@ type integrationDataSource struct {
 
 // integrationDataSourceModel maps the data source schema data.
 type integrationDataSourceModel struct {
-	ID           types.String `tfsdk:"id"`
-	Slug         types.String `tfsdk:"slug"`
-	Name         types.String `tfsdk:"name"`
-	AIProviderID types.String `tfsdk:"ai_provider_id"`
-	Description  types.String `tfsdk:"description"`
-	Status       types.String `tfsdk:"status"`
-	CreatedAt    types.String `tfsdk:"created_at"`
-	UpdatedAt    types.String `tfsdk:"updated_at"`
+	ID             types.String `tfsdk:"id"`
+	Slug           types.String `tfsdk:"slug"`
+	Name           types.String `tfsdk:"name"`
+	AIProviderID   types.String `tfsdk:"ai_provider_id"`
+	Description    types.String `tfsdk:"description"`
+	Status         types.String `tfsdk:"status"`
+	CreatedAt      types.String `tfsdk:"created_at"`
+	UpdatedAt      types.String `tfsdk:"updated_at"`
+	SecretMappings types.List   `tfsdk:"secret_mappings"`
 }
 
 // Metadata returns the data source type name.
@@ -80,6 +82,26 @@ func (d *integrationDataSource) Schema(_ context.Context, _ datasource.SchemaReq
 			"updated_at": schema.StringAttribute{
 				Description: "Timestamp when the integration was last updated.",
 				Computed:    true,
+			},
+			"secret_mappings": schema.ListNestedAttribute{
+				Description: "Secret reference mappings configured on this integration. Each entry resolves a single integration field (`key` or `configurations.<field>`) from a `portkey_secret_reference` at request time.",
+				Computed:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"target_field": schema.StringAttribute{
+							Description: "Integration field populated by the mapping (`key` or `configurations.<field>`).",
+							Computed:    true,
+						},
+						"secret_reference_id": schema.StringAttribute{
+							Description: "UUID or slug of the referenced `portkey_secret_reference`.",
+							Computed:    true,
+						},
+						"secret_key": schema.StringAttribute{
+							Description: "Optional override for the secret reference's `secret_key`.",
+							Computed:    true,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -141,6 +163,34 @@ func (d *integrationDataSource) Read(ctx context.Context, req datasource.ReadReq
 	} else {
 		state.UpdatedAt = types.StringNull()
 	}
+
+	// Project secret_mappings from the API response. The data-source variant
+	// uses a List (order-preserving) since the server's returned order is the
+	// only meaningful one for a read-only view.
+	smObjType := types.ObjectType{AttrTypes: secretMappingAttrTypes}
+	smElems := make([]attr.Value, 0, len(integration.SecretMappings))
+	for _, m := range integration.SecretMappings {
+		attrs := map[string]attr.Value{
+			"target_field":        types.StringValue(m.TargetField),
+			"secret_reference_id": types.StringValue(m.SecretReferenceID),
+			"secret_key":          types.StringNull(),
+		}
+		if m.SecretKey != nil {
+			attrs["secret_key"] = types.StringValue(*m.SecretKey)
+		}
+		obj, objDiags := types.ObjectValue(secretMappingAttrTypes, attrs)
+		resp.Diagnostics.Append(objDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		smElems = append(smElems, obj)
+	}
+	smList, listDiags := types.ListValue(smObjType, smElems)
+	resp.Diagnostics.Append(listDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.SecretMappings = smList
 
 	// Set state
 	diags = resp.State.Set(ctx, &state)

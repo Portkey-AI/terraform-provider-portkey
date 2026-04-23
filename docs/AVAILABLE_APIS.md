@@ -36,6 +36,12 @@ All primary Portkey resources are now implemented in the Terraform provider.
 |----------|----------|------------|-------------------|
 | API Keys | `/api-keys` | CRUD | `portkey_api_key` |
 
+### Secret Management
+
+| Resource | Endpoint | Operations | Terraform Resource |
+|----------|----------|------------|-------------------|
+| Secret References | `/secret-references` | CRUD | `portkey_secret_reference` |
+
 ## Data Sources
 
 | Data Source | Description |
@@ -60,6 +66,8 @@ All primary Portkey resources are now implemented in the Terraform provider.
 | `portkey_rate_limits_policies` | List rate limits policies |
 | `portkey_api_key` | Fetch single API key by ID |
 | `portkey_api_keys` | List API keys |
+| `portkey_secret_reference` | Fetch single secret reference by slug |
+| `portkey_secret_references` | List secret references |
 
 ## Known Limitations
 
@@ -89,6 +97,12 @@ Organization Level (Admin API Key)
 ├── /admin/users ✅ (read-only)
 ├── /admin/users/invites ✅
 │
+Organization-owned with per-workspace visibility (Admin API Key)
+└── /secret-references ✅
+    # Object is org-scoped (has organisation_id, no workspace_id). Visibility
+    # to workspaces is controlled by allow_all_workspaces / allowed_workspaces
+    # in the request body, not by the URL scope.
+│
 Workspace Level (Workspace or Admin API Key)
 ├── /integrations ✅
 ├── /providers (virtual-keys) ✅
@@ -116,6 +130,7 @@ All implemented resources have passing acceptance tests:
 | Usage Limits Policies | 4 tests | ✅ Passing |
 | Rate Limits Policies | 4 tests | ✅ Passing |
 | API Keys | 4 tests | ✅ Passing |
+| Secret References | 11 tests | ✅ Passing |
 
 ## Related Documentation
 

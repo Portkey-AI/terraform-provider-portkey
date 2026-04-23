@@ -86,3 +86,43 @@ resource "portkey_integration_model_access" "gpt4" {
 - `status` (String) Status of the integration (active, archived).
 - `type` (String) Type of integration: 'organisation' for org-level integrations or 'workspace' for workspace-scoped integrations.
 - `updated_at` (String) Timestamp when the integration was last updated.
+
+## Using a Secret Reference Instead of an Inline Key
+
+An integration can resolve credentials at request time from a [`portkey_secret_reference`](./secret_reference.md) (AWS Secrets Manager, Azure Key Vault, or HashiCorp Vault) via `secret_mappings`. The credential value is then never stored on the integration or in Terraform state.
+
+```terraform
+resource "portkey_secret_reference" "openai_key" {
+  name         = "openai-prod"
+  manager_type = "aws_sm"
+  secret_path  = "portkey/openai/prod"
+  secret_key   = "OPENAI_API_KEY"
+
+  aws_access_key_auth = {
+    aws_region            = "us-east-1"
+    aws_access_key_id     = var.aws_access_key_id
+    aws_secret_access_key = var.aws_secret_access_key
+  }
+}
+
+resource "portkey_integration" "openai" {
+  name           = "openai-production"
+  ai_provider_id = "openai"
+  # key / key_wo intentionally omitted - the mapping below supplies it.
+
+  secret_mappings = [
+    {
+      target_field        = "key"
+      secret_reference_id = portkey_secret_reference.openai_key.slug
+    },
+  ]
+}
+```
+
+Each mapping has:
+
+- `target_field` — `"key"` for the provider API key, or `"configurations.<field>"` for a single sensitive field inside `configurations` (e.g. `"configurations.aws_secret_access_key"`). Must be unique within the set.
+- `secret_reference_id` — the `slug` or UUID of the `portkey_secret_reference`.
+- `secret_key` *(optional)* — overrides the reference's own `secret_key` for this single field, when one vault entry holds a JSON payload with multiple values.
+
+When `target_field = "key"` is present, the inline `key` / `key_wo` arguments can be omitted. Omitting `secret_mappings` entirely preserves prior behaviour for existing integrations; setting it to `[]` explicitly clears all mappings. See the [secret reference resource docs](./secret_reference.md#using-a-secret-reference-in-a-portkey_integration) for more patterns (Bedrock, Azure OpenAI, etc.).

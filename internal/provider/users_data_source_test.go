@@ -49,15 +49,26 @@ func TestAccUsersDataSource_filterByEmail(t *testing.T) {
 }
 
 func TestAccUsersDataSource_filterByRole(t *testing.T) {
+	var firstUserRole string
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
+				Config: testAccUsersDataSourceConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					extractAttr("data.portkey_users.all", "users.0.role", &firstUserRole),
+				),
+			},
+			{
 				Config: testAccUsersDataSourceFilterByRoleConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("data.portkey_users.by_role", "users.#"),
-					resource.TestCheckResourceAttr("data.portkey_users.by_role", "users.0.role", "admin"),
+					resource.TestCheckResourceAttrPair(
+						"data.portkey_users.by_role", "users.0.role",
+						"data.portkey_users.all", "users.0.role",
+					),
 				),
 			},
 		},
@@ -88,8 +99,10 @@ func testAccUsersDataSourceFilterByRoleConfig() string {
 	return `
 provider "portkey" {}
 
+data "portkey_users" "all" {}
+
 data "portkey_users" "by_role" {
-  role = "admin"
+  role = data.portkey_users.all.users[0].role
 }
 `
 }

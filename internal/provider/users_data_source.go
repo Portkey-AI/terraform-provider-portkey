@@ -147,6 +147,7 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		return
 	}
 
+	state.Users = []userModel{}
 	for _, user := range users {
 		userState := userModel{
 			ID:        types.StringValue(user.ID),

@@ -18,3 +18,4 @@ Interact with Portkey Admin API for managing workspaces, users, and organization
 
 - `api_key` (String, Sensitive) Admin API key for Portkey. Can also be set via PORTKEY_API_KEY environment variable.
 - `base_url` (String) Base URL for Portkey API. Defaults to https://api.portkey.ai/v1. Can be set via PORTKEY_BASE_URL for self-hosted deployments.
+- `max_retries` (Number) Maximum number of retries for transient HTTP failures (network errors and 5xx responses). Must be a non-negative integer. Defaults to 4 (5 attempts total). Set to 0 to disable retries. Can also be set via the PORTKEY_MAX_RETRIES environment variable.

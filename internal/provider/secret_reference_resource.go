@@ -741,7 +741,10 @@ func (r *secretReferenceResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	applyReadToState(ctx, &plan, secretRef)
+	resp.Diagnostics.Append(applyReadToState(ctx, &plan, secretRef)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -771,7 +774,10 @@ func (r *secretReferenceResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	applyReadToState(ctx, &state, secretRef)
+	resp.Diagnostics.Append(applyReadToState(ctx, &state, secretRef)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -861,7 +867,10 @@ func (r *secretReferenceResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	applyReadToState(ctx, &plan, secretRef)
+	resp.Diagnostics.Append(applyReadToState(ctx, &plan, secretRef)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -1091,10 +1100,12 @@ func authVersionChanged(plan, state *secretReferenceResourceModel) bool {
 	return plan.AuthVersion.ValueInt64() != state.AuthVersion.ValueInt64()
 }
 
-// applyReadToState maps API response fields onto the Terraform state model. It does
-// NOT overwrite auth_* blocks: the API returns those with secrets masked, which would
-// cause spurious diffs on every plan.
-func applyReadToState(_ context.Context, m *secretReferenceResourceModel, s *client.SecretReference) {
+// applyReadToState maps API response fields onto the Terraform state model.
+// Skips auth_* blocks (returned masked → spurious diffs) and allowed_workspaces
+// (never echoed by GET → would clobber user config).
+func applyReadToState(ctx context.Context, m *secretReferenceResourceModel, s *client.SecretReference) diag.Diagnostics {
+	var diags diag.Diagnostics
+
 	m.ID = types.StringValue(s.ID)
 	if m.Slug.IsNull() || m.Slug.IsUnknown() {
 		m.Slug = types.StringValue(s.Slug)
@@ -1117,6 +1128,14 @@ func applyReadToState(_ context.Context, m *secretReferenceResourceModel, s *cli
 
 	m.AllowAllWorkspaces = types.BoolValue(s.AllowAllWorkspaces)
 
+	if len(s.Tags) > 0 {
+		tags, d := types.MapValueFrom(ctx, types.StringType, s.Tags)
+		diags.Append(d...)
+		m.Tags = tags
+	} else if m.Tags.IsUnknown() {
+		m.Tags = types.MapNull(types.StringType)
+	}
+
 	if m.Status.IsUnknown() || s.Status != "" {
 		m.Status = types.StringValue(s.Status)
 	}
@@ -1129,4 +1148,6 @@ func applyReadToState(_ context.Context, m *secretReferenceResourceModel, s *cli
 	} else {
 		m.UpdatedAt = m.CreatedAt
 	}
+
+	return diags
 }

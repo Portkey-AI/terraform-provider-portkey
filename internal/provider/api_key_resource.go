@@ -19,10 +19,10 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource                 = &apiKeyResource{}
-	_ resource.ResourceWithConfigure    = &apiKeyResource{}
-	_ resource.ResourceWithImportState  = &apiKeyResource{}
-	_ resource.ResourceWithModifyPlan   = &apiKeyResource{}
+	_ resource.Resource                = &apiKeyResource{}
+	_ resource.ResourceWithConfigure   = &apiKeyResource{}
+	_ resource.ResourceWithImportState = &apiKeyResource{}
+	_ resource.ResourceWithModifyPlan  = &apiKeyResource{}
 )
 
 // NewAPIKeyResource is a helper function to simplify the provider implementation.

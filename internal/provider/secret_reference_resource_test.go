@@ -183,7 +183,7 @@ func TestAccSecretReferenceResource_writeOnly_create(t *testing.T) {
 //  3. Bump auth_version=2  -> apply succeeds, auth_version updates in state,
 //     plain sibling stays null throughout.
 //  4. Keep auth_version=2, change only non-credential attributes (description)
-//      -> apply succeeds, credential is preserved server-side via the API's
+//     -> apply succeeds, credential is preserved server-side via the API's
 //     auth_config merge semantics, plain sibling still null.
 //
 // Together these steps prove the state-safety property (the credential never

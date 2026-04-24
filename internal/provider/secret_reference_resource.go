@@ -427,18 +427,30 @@ func (r *secretReferenceResource) Schema(_ context.Context, _ resource.SchemaReq
 			"status": schema.StringAttribute{
 				Description: "Status of the secret reference (e.g. 'ACTIVE').",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"created_by": schema.StringAttribute{
 				Description: "Identity that created the secret reference.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the secret reference was created.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"updated_at": schema.StringAttribute{
 				Description: "Timestamp when the secret reference was last updated.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -515,6 +527,17 @@ func (r *secretReferenceResource) ModifyPlan(ctx context.Context, req resource.M
 			"allow_all_workspaces cannot be true when allowed_workspaces is non-empty. "+
 				"Set allow_all_workspaces = false (or omit it) when providing allowed_workspaces.",
 		)
+	}
+
+	// When the user omits allow_all_workspaces but provides a non-empty
+	// allowed_workspaces list, mirror the server's behaviour (it implicitly
+	// sets allow_all_workspaces=false) in the plan. Without this, the schema
+	// default pushes plan=true while the API stores false, producing perpetual
+	// drift on every refresh.
+	if config.AllowAllWorkspaces.IsNull() &&
+		!config.AllowedWorkspaces.IsNull() && !config.AllowedWorkspaces.IsUnknown() &&
+		len(config.AllowedWorkspaces.Elements()) > 0 {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("allow_all_workspaces"), types.BoolValue(false))...)
 	}
 
 	// API rejects allowed_workspaces=[] with AB01. Catch at plan time instead of apply time.

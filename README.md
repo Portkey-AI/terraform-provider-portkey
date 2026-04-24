@@ -825,7 +825,7 @@ See `examples/secret_reference/` for a complete, runnable example covering AWS, 
 | Data Source | Description | Key Arguments |
 |-------------|-------------|---------------|
 | `portkey_secret_reference` | Fetch a single secret reference by slug (auth credentials not exposed) | `slug` |
-| `portkey_secret_references` | List secret references (paginated, filterable by `search`, `manager_type`, `workspace_id`) | - |
+| `portkey_secret_references` | List secret references (paginated, filterable by `search`, `manager_type`) | - |
 
 > **Note:** Neither data source exposes the `auth_config` block. The API returns credential fields masked, so surfacing them in a data source would only leak placeholder values and invite state drift.
 

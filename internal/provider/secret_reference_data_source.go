@@ -157,7 +157,9 @@ func (d *secretReferenceDataSource) Read(ctx context.Context, req datasource.Rea
 	}
 
 	state.ID = types.StringValue(secretRef.ID)
-	state.Slug = types.StringValue(secretRef.Slug)
+	// Preserve whatever the user configured (slug or UUID) — do not overwrite
+	// a Required input with the canonical slug. The canonical value is available
+	// via `id` (UUID) and, if the user configured a slug, it already matches.
 	state.Name = types.StringValue(secretRef.Name)
 	state.ManagerType = types.StringValue(secretRef.ManagerType)
 	state.SecretPath = types.StringValue(secretRef.SecretPath)

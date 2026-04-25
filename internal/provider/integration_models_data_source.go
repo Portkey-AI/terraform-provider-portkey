@@ -219,8 +219,8 @@ func (d *integrationModelsDataSource) Read(ctx context.Context, req datasource.R
 		mAttrs := map[string]attr.Value{
 			"slug":            types.StringValue(m.Slug),
 			"enabled":         types.BoolValue(m.Enabled),
-			"is_custom":       types.BoolValue(m.IsCustom),
-			"is_finetune":     types.BoolValue(m.IsFinetune),
+			"is_custom":       types.BoolValue(bool(m.IsCustom)),
+			"is_finetune":     types.BoolValue(bool(m.IsFinetune)),
 			"base_model_slug": baseModelSlug,
 			"pricing_config":  pricingConfigVal,
 		}

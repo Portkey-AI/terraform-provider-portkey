@@ -1887,12 +1887,47 @@ type ModelPricingConfig struct {
 	PayAsYouGo *PayAsYouGoPricing `json:"pay_as_you_go,omitempty"`
 }
 
+// FlexBool is a boolean type that tolerates the Portkey API returning
+// is_custom / is_finetune as a JSON number (1), a JSON string ("false"),
+// or a proper JSON boolean.  It implements encoding/json.Unmarshaler so
+// json.Unmarshal handles all three representations transparently.
+type FlexBool bool
+
+// UnmarshalJSON implements encoding/json.Unmarshaler.
+func (f *FlexBool) UnmarshalJSON(data []byte) error {
+	// Try JSON boolean first: true / false
+	var b bool
+	if err := json.Unmarshal(data, &b); err == nil {
+		*f = FlexBool(b)
+		return nil
+	}
+	// Try JSON number: 1 / 0
+	var n float64
+	if err := json.Unmarshal(data, &n); err == nil {
+		*f = FlexBool(n != 0)
+		return nil
+	}
+	// Try JSON string: "false" / "true" / "0" / "1" / ""
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*f = FlexBool(s != "false" && s != "0" && s != "")
+		return nil
+	}
+	return fmt.Errorf("cannot unmarshal %s into FlexBool", string(data))
+}
+
+// MarshalJSON implements encoding/json.Marshaler so the value round-trips
+// as a plain JSON boolean.
+func (f FlexBool) MarshalJSON() ([]byte, error) {
+	return json.Marshal(bool(f))
+}
+
 // IntegrationModel represents a model available through an integration
 type IntegrationModel struct {
 	Slug          string              `json:"slug"`
 	Enabled       bool                `json:"enabled"`
-	IsCustom      bool                `json:"is_custom,omitempty"`
-	IsFinetune    bool                `json:"is_finetune,omitempty"`
+	IsCustom      FlexBool            `json:"is_custom,omitempty"`
+	IsFinetune    FlexBool            `json:"is_finetune,omitempty"`
 	BaseModelSlug string              `json:"base_model_slug,omitempty"`
 	PricingConfig *ModelPricingConfig `json:"pricing_config,omitempty"`
 }

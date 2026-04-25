@@ -49,6 +49,8 @@ coverage.out
 # IDE and editor files
 .idea/
 .vscode/
+.claude/
+.cursor/
 *.swp
 *.swo
 *~

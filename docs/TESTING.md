@@ -187,6 +187,9 @@ TF_ACC=1 go test ./internal/provider -v -run TestName -count=1
 | User Data Source | ✅ Passing | |
 | Users Data Source | ✅ Passing | |
 | Workspace Member Resource | ⏸️ Skipped | Blocked by API bug in `getMember` endpoint |
+| Secret Reference Resource | ✅ Passing | CRUD + write-only credentials, `auth_version` rotation, and plan-time validation |
+| Secret Reference Data Source | ✅ Passing | |
+| Secret References Data Source | ✅ Passing | |
 
 ## Troubleshooting
 

@@ -31,6 +31,9 @@ This provider enables you to manage:
 ### Access Control
 - **API Keys**: Create and manage Portkey API keys (organization and workspace-scoped)
 
+### Secret Management
+- **Secret References**: Register external secret managers (AWS Secrets Manager, Azure Key Vault, HashiCorp Vault) with plan-time validated, typed auth blocks
+
 ## Requirements
 
 - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
@@ -702,6 +705,118 @@ Manages Portkey API keys (organization-scoped or workspace-scoped).
 
 **Import**: `terraform import portkey_api_key.example api-key-id`
 
+---
+
+### Secret Management Resources
+
+#### `portkey_secret_reference`
+
+Registers an external secret manager (AWS Secrets Manager, Azure Key Vault, or HashiCorp Vault) with Portkey. Instead of embedding credentials in Portkey, you reference a secret stored in your existing vault. Credentials inside the auth blocks are marked `Sensitive` and are never returned by the API after creation (the API returns them masked; the provider preserves the user-supplied values in state to avoid spurious diffs).
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | String | Yes | Display name |
+| `description` | String | No | Optional description |
+| `manager_type` | String | Yes (ForceNew) | `aws_sm`, `azure_kv`, or `hashicorp_vault` |
+| `secret_path` | String | Yes | Path to the secret in the external manager |
+| `secret_key` | String | No | Optional key within the secret payload |
+| `tags` | Map(String) | No | Arbitrary string tags |
+| `allow_all_workspaces` | Bool | No | If `true` (default), reference is usable in every workspace. Mutually exclusive with a non-empty `allowed_workspaces` |
+| `allowed_workspaces` | Set(String) | No | Restrict usage to these workspace IDs/slugs |
+| Exactly one of the 9 `*_auth` blocks (see below) | | Yes | Plan-time validated |
+
+**Plan-time validation (enforced in `ModifyPlan`):**
+- Exactly one `*_auth` block must be configured.
+- The configured `*_auth` block must match the declared `manager_type` family.
+- `allow_all_workspaces = true` cannot be combined with a non-empty `allowed_workspaces`.
+
+These errors are raised during `terraform plan`, not `terraform apply`, for fast feedback.
+
+**Supported auth blocks by `manager_type`:**
+
+| `manager_type` | Valid auth blocks |
+|----------------|--------------------|
+| `aws_sm` | `aws_access_key_auth`, `aws_assumed_role_auth`, `aws_service_role_auth` |
+| `azure_kv` | `azure_entra_auth`, `azure_managed_auth` |
+| `hashicorp_vault` | `vault_token_auth`, `vault_approle_auth`, `vault_kubernetes_auth` |
+
+**Import**: `terraform import portkey_secret_reference.example secret-reference-slug`
+
+##### AWS Secrets Manager (Access Keys)
+
+```hcl
+resource "portkey_secret_reference" "aws_prod" {
+  name         = "AWS Prod Secrets"
+  manager_type = "aws_sm"
+  secret_path  = "prod/openai/api-key"
+
+  aws_access_key_auth = {
+    aws_access_key_id     = var.aws_access_key_id
+    aws_secret_access_key = var.aws_secret_access_key
+    aws_region            = "us-east-1"
+  }
+
+  allow_all_workspaces = true
+}
+```
+
+##### AWS Secrets Manager (Assumed Role)
+
+```hcl
+resource "portkey_secret_reference" "aws_role" {
+  name         = "AWS Role-Based"
+  manager_type = "aws_sm"
+  secret_path  = "prod/openai/api-key"
+
+  aws_assumed_role_auth = {
+    aws_role_arn    = "arn:aws:iam::123456789012:role/PortkeySecretsRole"
+    aws_region      = "us-east-1"
+    aws_external_id = "optional-external-id"
+  }
+}
+```
+
+##### HashiCorp Vault (AppRole)
+
+```hcl
+resource "portkey_secret_reference" "vault_approle" {
+  name         = "Vault AppRole"
+  manager_type = "hashicorp_vault"
+  secret_path  = "secret/data/openai"
+
+  vault_approle_auth = {
+    vault_addr      = "https://vault.example.com"
+    vault_role_id   = var.vault_role_id
+    vault_secret_id = var.vault_secret_id
+    vault_namespace = "admin" # Optional (Vault Enterprise)
+  }
+
+  allow_all_workspaces = false
+  allowed_workspaces = [
+    portkey_workspace.production.id,
+  ]
+}
+```
+
+##### Azure Key Vault (Entra Service Principal)
+
+```hcl
+resource "portkey_secret_reference" "azure_entra" {
+  name         = "Azure Key Vault (Entra)"
+  manager_type = "azure_kv"
+  secret_path  = "openai-api-key"
+
+  azure_entra_auth = {
+    azure_vault_url           = "https://my-vault.vault.azure.net/"
+    azure_entra_tenant_id     = var.azure_tenant_id
+    azure_entra_client_id     = var.azure_client_id
+    azure_entra_client_secret = var.azure_client_secret
+  }
+}
+```
+
+See `examples/secret_reference/` for a complete, runnable example covering AWS, Azure, and Vault variants plus data source usage.
+
 ## Data Sources
 
 ### Organization Data Sources
@@ -744,6 +859,15 @@ Manages Portkey API keys (organization-scoped or workspace-scoped).
 |-------------|-------------|---------------|
 | `portkey_api_key` | Fetch a single API key | `id` |
 | `portkey_api_keys` | List API keys | `workspace_id` (optional) |
+
+### Secret Management Data Sources
+
+| Data Source | Description | Key Arguments |
+|-------------|-------------|---------------|
+| `portkey_secret_reference` | Fetch a single secret reference by slug (auth credentials not exposed) | `slug` |
+| `portkey_secret_references` | List secret references (paginated, filterable by `search`, `manager_type`) | - |
+
+> **Note:** Neither data source exposes the `auth_config` block. The API returns credential fields masked, so surfacing them in a data source would only leak placeholder values and invite state drift.
 
 ## Development
 

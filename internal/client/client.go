@@ -486,6 +486,26 @@ func (c *Client) DeleteUserInvite(ctx context.Context, id string) error {
 	return err
 }
 
+// SecretMapping describes a dynamic credential resolution directive that tells
+// Portkey to read a secret from a configured portkey_secret_reference at
+// request time instead of from the integration's stored config.
+//
+// TargetField is the destination field on the integration:
+//   - "key" (populates the integration's provider API key), or
+//   - "configurations.<field>" (e.g. "configurations.aws_secret_access_key").
+//
+// SecretReferenceID is a UUID or slug of a Portkey secret reference that must
+// belong to the same organisation and be accessible by the workspace.
+//
+// SecretKey optionally overrides the secret_key defined on the referenced
+// secret reference (used to pick a specific field out of a multi-value
+// secret payload).
+type SecretMapping struct {
+	TargetField       string  `json:"target_field"`
+	SecretReferenceID string  `json:"secret_reference_id"`
+	SecretKey         *string `json:"secret_key,omitempty"`
+}
+
 // Integration represents a Portkey integration (connection to an AI provider)
 type Integration struct {
 	ID             string                 `json:"id"`
@@ -500,9 +520,15 @@ type Integration struct {
 	UpdatedAt      time.Time              `json:"last_updated_at"`
 	Type           string                 `json:"type,omitempty"`
 	WorkspaceID    string                 `json:"workspace_id,omitempty"`
+	SecretMappings []SecretMapping        `json:"secret_mappings,omitempty"`
 }
 
-// CreateIntegrationRequest represents the request to create an integration
+// CreateIntegrationRequest represents the request to create an integration.
+//
+// SecretMappings is a pointer-to-slice so that callers can distinguish three
+// states on the wire: (a) omit the field entirely (nil pointer → omitempty),
+// (b) send an explicit empty array to clear all mappings (&[]{}), or (c) send
+// a concrete list of mappings.
 type CreateIntegrationRequest struct {
 	Name           string                 `json:"name"`
 	Slug           string                 `json:"slug,omitempty"`
@@ -511,14 +537,17 @@ type CreateIntegrationRequest struct {
 	Description    string                 `json:"description,omitempty"`
 	Configurations map[string]interface{} `json:"configurations,omitempty"`
 	WorkspaceID    string                 `json:"workspace_id,omitempty"`
+	SecretMappings *[]SecretMapping       `json:"secret_mappings,omitempty"`
 }
 
-// UpdateIntegrationRequest represents the request to update an integration
+// UpdateIntegrationRequest represents the request to update an integration.
+// See CreateIntegrationRequest for the SecretMappings pointer semantics.
 type UpdateIntegrationRequest struct {
 	Name           string                 `json:"name,omitempty"`
 	Key            string                 `json:"key,omitempty"`
 	Description    string                 `json:"description,omitempty"`
 	Configurations map[string]interface{} `json:"configurations,omitempty"`
+	SecretMappings *[]SecretMapping       `json:"secret_mappings,omitempty"`
 }
 
 // CreateIntegrationResponse represents the response from creating an integration
@@ -2308,4 +2337,168 @@ func (c *Client) UpdateMcpIntegrationWorkspace(ctx context.Context, id string, u
 	}
 	_, err := c.doRequest(ctx, http.MethodPut, path, req)
 	return err
+}
+
+// SecretReferenceAuthConfig is the polymorphic auth_config payload shipped to the API.
+// The provider builds this from the typed nested auth blocks in the Terraform schema
+// and injects the appropriate discriminator key (aws_auth_type / azure_auth_mode /
+// vault_auth_type). The API may return it on GET with sensitive fields masked.
+type SecretReferenceAuthConfig map[string]interface{}
+
+// SecretReference represents a Portkey secret reference to an external secret manager.
+type SecretReference struct {
+	ID                 string                    `json:"id"`
+	Slug               string                    `json:"slug"`
+	OrganisationID     string                    `json:"organisation_id,omitempty"`
+	Name               string                    `json:"name"`
+	Description        string                    `json:"description,omitempty"`
+	ManagerType        string                    `json:"manager_type"`
+	SecretPath         string                    `json:"secret_path"`
+	SecretKey          string                    `json:"secret_key,omitempty"`
+	AllowAllWorkspaces bool                      `json:"allow_all_workspaces"`
+	AllowedWorkspaces  []string                  `json:"allowed_workspaces,omitempty"`
+	Tags               map[string]string         `json:"tags,omitempty"`
+	Status             string                    `json:"status,omitempty"`
+	CreatedBy          string                    `json:"created_by,omitempty"`
+	CreatedAt          time.Time                 `json:"created_at,omitempty"`
+	UpdatedAt          time.Time                 `json:"last_updated_at,omitempty"`
+	AuthConfig         SecretReferenceAuthConfig `json:"auth_config,omitempty"`
+	Object             string                    `json:"object,omitempty"`
+}
+
+// CreateSecretReferenceRequest is the body for POST /secret-references.
+type CreateSecretReferenceRequest struct {
+	Name               string                    `json:"name"`
+	Slug               string                    `json:"slug,omitempty"`
+	Description        string                    `json:"description,omitempty"`
+	ManagerType        string                    `json:"manager_type"`
+	AuthConfig         SecretReferenceAuthConfig `json:"auth_config"`
+	SecretPath         string                    `json:"secret_path"`
+	SecretKey          string                    `json:"secret_key,omitempty"`
+	AllowAllWorkspaces *bool                     `json:"allow_all_workspaces,omitempty"`
+	AllowedWorkspaces  []string                  `json:"allowed_workspaces,omitempty"`
+	Tags               map[string]string         `json:"tags,omitempty"`
+	OrganisationID     string                    `json:"organisation_id,omitempty"`
+}
+
+// UpdateSecretReferenceRequest is the body for PUT /secret-references/{id}.
+// On the API side, auth_config is merged with the existing config and validated
+// against the existing manager_type (so manager_type is effectively immutable).
+// allowed_workspaces replaces existing mappings and implicitly sets
+// allow_all_workspaces = false.
+//
+// SecretKey uses json.RawMessage for three-state semantics:
+//   - nil: field omitted (server merge keeps current value)
+//   - client.JSONNull: sends "secret_key": null (clears the field)
+//   - marshalled string: sends "secret_key": "value"
+type UpdateSecretReferenceRequest struct {
+	Name               string                    `json:"name,omitempty"`
+	Description        string                    `json:"description,omitempty"`
+	AuthConfig         SecretReferenceAuthConfig `json:"auth_config,omitempty"`
+	SecretPath         string                    `json:"secret_path,omitempty"`
+	SecretKey          json.RawMessage           `json:"secret_key,omitempty"`
+	AllowAllWorkspaces *bool                     `json:"allow_all_workspaces,omitempty"`
+	AllowedWorkspaces  []string                  `json:"allowed_workspaces,omitempty"`
+	Tags               map[string]string         `json:"tags,omitempty"`
+}
+
+// CreateSecretReferenceResponse is the response from POST /secret-references.
+type CreateSecretReferenceResponse struct {
+	ID     string `json:"id"`
+	Slug   string `json:"slug"`
+	Object string `json:"object"`
+}
+
+// ListSecretReferencesOptions captures optional query parameters for list.
+type ListSecretReferencesOptions struct {
+	ManagerType string
+	Search      string
+	CurrentPage int
+	PageSize    int
+}
+
+// ListSecretReferencesResponse is the response from GET /secret-references.
+type ListSecretReferencesResponse struct {
+	Object string            `json:"object"`
+	Total  int               `json:"total"`
+	Data   []SecretReference `json:"data"`
+}
+
+// CreateSecretReference creates a new secret reference.
+func (c *Client) CreateSecretReference(ctx context.Context, req CreateSecretReferenceRequest) (*CreateSecretReferenceResponse, error) {
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/secret-references", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var response CreateSecretReferenceResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetSecretReference retrieves a secret reference by UUID or slug.
+func (c *Client) GetSecretReference(ctx context.Context, idOrSlug string) (*SecretReference, error) {
+	respBody, err := c.doRequest(ctx, http.MethodGet, "/secret-references/"+idOrSlug, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var secretRef SecretReference
+	if err := json.Unmarshal(respBody, &secretRef); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &secretRef, nil
+}
+
+// UpdateSecretReference updates a secret reference by UUID or slug. Returns the
+// refreshed object by re-fetching, since PUT returns an empty object.
+func (c *Client) UpdateSecretReference(ctx context.Context, idOrSlug string, req UpdateSecretReferenceRequest) (*SecretReference, error) {
+	_, err := c.doRequest(ctx, http.MethodPut, "/secret-references/"+idOrSlug, req)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetSecretReference(ctx, idOrSlug)
+}
+
+// DeleteSecretReference deletes a secret reference by UUID or slug.
+func (c *Client) DeleteSecretReference(ctx context.Context, idOrSlug string) error {
+	_, err := c.doRequest(ctx, http.MethodDelete, "/secret-references/"+idOrSlug, nil)
+	return err
+}
+
+// ListSecretReferences retrieves all secret references, optionally filtered.
+func (c *Client) ListSecretReferences(ctx context.Context, opts ListSecretReferencesOptions) (*ListSecretReferencesResponse, error) {
+	path := "/secret-references"
+	params := []string{}
+	if opts.ManagerType != "" {
+		params = append(params, "manager_type="+opts.ManagerType)
+	}
+	if opts.Search != "" {
+		params = append(params, "search="+opts.Search)
+	}
+	if opts.CurrentPage > 0 {
+		params = append(params, fmt.Sprintf("current_page=%d", opts.CurrentPage))
+	}
+	if opts.PageSize > 0 {
+		params = append(params, fmt.Sprintf("page_size=%d", opts.PageSize))
+	}
+	if len(params) > 0 {
+		path += "?" + strings.Join(params, "&")
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response ListSecretReferencesResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
 }

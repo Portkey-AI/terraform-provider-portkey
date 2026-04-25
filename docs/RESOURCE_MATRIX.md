@@ -11,7 +11,8 @@
 | Governance | 3 | 6 | ✅ All passing |
 | Access Control | 1 | 2 | ✅ All passing |
 | MCP Gateway | 3 | 2 | ✅ All passing (11 tests) |
-| **Total** | **16** | **26** | **All passing** |
+| Secret Management | 1 | 2 | ✅ Plan-time validation covered |
+| **Total** | **17** | **28** | **All passing** |
 
 ## Provider Resources
 
@@ -33,6 +34,7 @@
 | `portkey_mcp_integration` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD | ✅ Passing |
 | `portkey_mcp_integration_workspace_access` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT wrapping | ✅ Passing |
 | `portkey_mcp_integration_capabilities` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT | ✅ Passing |
+| `portkey_secret_reference` | ✅ | ✅ | ✅ | ✅ | ✅ | 9 typed auth blocks | ✅ Passing |
 
 ## Data Sources
 
@@ -64,6 +66,8 @@
 | `portkey_rate_limits_policies` | - | ✅ | Working | ✅ Passing |
 | `portkey_mcp_integration` | ✅ | - | Working | ✅ Passing |
 | `portkey_mcp_integrations` | - | ✅ | Working | ✅ Passing |
+| `portkey_secret_reference` | ✅ | - | Working | ✅ Passing |
+| `portkey_secret_references` | - | ✅ | Working | ✅ Passing |
 
 ## Not Implemented (API Available)
 
@@ -314,6 +318,37 @@ PUT    /mcp-integrations/{id}/workspaces          → Update workspace access (b
 - Delete operations set `enabled=false` (no real DELETE endpoint)
 
 > **Note:** `portkey_mcp_server` resources are not implemented — the `/mcp-servers` API returns 403 and appears to require additional permissions not available via the Admin API key. MCP integrations + workspace access is sufficient for the primary use case.
+
+### Secret References
+```
+POST   /secret-references               → Create (returns {id, slug, object})
+GET    /secret-references               → List {object:"list", total, data:[...]}; supports ?search, ?manager_type, ?current_page, ?page_size
+GET    /secret-references/{id_or_slug}  → Read; sensitive auth_config fields are returned with a `masked_` prefix (e.g. `masked_aws_access_key_id`) and their values masked
+PUT    /secret-references/{id_or_slug}  → Update; returns {}. Each auth_config field is merged independently: omit a field to keep the existing server-side value, include it to rotate. `manager_type` in the body is silently ignored (effectively immutable)
+DELETE /secret-references/{id_or_slug}  → Delete; returns {}. Subsequent GET returns 404 (errorCode AB08)
+```
+
+**Supported `manager_type` values and their auth blocks (exactly one must be set):**
+
+| `manager_type` | Valid auth blocks |
+|----------------|--------------------|
+| `aws_sm` | `aws_access_key_auth`, `aws_assumed_role_auth`, `aws_service_role_auth` |
+| `azure_kv` | `azure_entra_auth`, `azure_managed_auth` |
+| `hashicorp_vault` | `vault_token_auth`, `vault_approle_auth`, `vault_kubernetes_auth` |
+
+**Plan-time validations (enforced in `ModifyPlan`):**
+- Exactly one `*_auth` block must be configured.
+- The configured auth block must match the declared `manager_type` family.
+- `allow_all_workspaces = true` is mutually exclusive with a non-empty `allowed_workspaces`.
+
+**Sensitive data handling:**
+- All credential fields inside `*_auth` blocks are marked `Sensitive`.
+- The API returns credentials masked on reads; the provider preserves the user-supplied values in state and does not overwrite them with the masked responses, avoiding spurious diffs.
+- `portkey_secret_reference` / `portkey_secret_references` data sources do **not** expose `auth_config` to avoid leaking masked placeholders.
+
+**Identifier strategy:**
+- `slug` is the primary identifier used for Read/Update/Delete and `terraform import`.
+- `id` is computed and tracked in state for reference.
 
 ## Known Issues
 

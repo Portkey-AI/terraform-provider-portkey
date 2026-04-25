@@ -1104,9 +1104,7 @@ func applyReadToState(ctx context.Context, m *secretReferenceResourceModel, s *c
 	var diags diag.Diagnostics
 
 	m.ID = types.StringValue(s.ID)
-	if m.Slug.IsNull() || m.Slug.IsUnknown() {
-		m.Slug = types.StringValue(s.Slug)
-	}
+	m.Slug = types.StringValue(s.Slug)
 	m.Name = types.StringValue(s.Name)
 	m.ManagerType = types.StringValue(s.ManagerType)
 	m.SecretPath = types.StringValue(s.SecretPath)

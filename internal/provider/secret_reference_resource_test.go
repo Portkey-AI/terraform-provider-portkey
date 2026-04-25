@@ -2,12 +2,33 @@ package provider
 
 import (
 	"fmt"
+	"os/exec"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
+
+// skipIfTerraformOlderThan skips the test if the installed Terraform version
+// is older than the specified minimum. Used for tests that require features
+// like WriteOnly attributes (TF 1.11+).
+func skipIfTerraformOlderThan(t *testing.T, minVersion string) {
+	t.Helper()
+	out, err := exec.Command("terraform", "version", "-json").Output()
+	if err != nil {
+		t.Skipf("Could not determine Terraform version: %v", err)
+	}
+	// Check if TF version meets minimum by looking for supported versions in JSON output
+	versionStr := string(out)
+	for _, v := range []string{"1.11", "1.12", "1.13", "1.14", "1.15", "2."} {
+		if strings.Contains(versionStr, `"terraform_version":"`+v) {
+			return // Version is sufficient
+		}
+	}
+	t.Skipf("Test requires Terraform %s or later", minVersion)
+}
 
 // TestAccSecretReferenceResource_awsAccessKey exercises the AWS Secrets
 // Manager path using static access-key credentials. It verifies create / read
@@ -148,6 +169,7 @@ func TestAccSecretReferenceResource_planValidation_conflictingWorkspaces(t *test
 //
 // This is the core "nothing in state" guarantee of the write-only pattern.
 func TestAccSecretReferenceResource_writeOnly_create(t *testing.T) {
+	skipIfTerraformOlderThan(t, "1.11")
 	rName := acctest.RandomWithPrefix("tf-acc-sr-wo")
 
 	resource.Test(t, resource.TestCase{
@@ -190,6 +212,7 @@ func TestAccSecretReferenceResource_writeOnly_create(t *testing.T) {
 // lands in .tfstate) and the rotation-gating property (the credential is only
 // sent on the wire when the user explicitly bumps auth_version).
 func TestAccSecretReferenceResource_authVersionRotation(t *testing.T) {
+	skipIfTerraformOlderThan(t, "1.11")
 	rName := acctest.RandomWithPrefix("tf-acc-sr-rotate")
 
 	resource.Test(t, resource.TestCase{
@@ -242,6 +265,7 @@ func TestAccSecretReferenceResource_authVersionRotation(t *testing.T) {
 // auth block fails at plan time with the "Conflicting credential attributes"
 // diagnostic.
 func TestAccSecretReferenceResource_planValidation_plainAndWOConflict(t *testing.T) {
+	skipIfTerraformOlderThan(t, "1.11")
 	rName := acctest.RandomWithPrefix("tf-acc-sr-plan")
 
 	resource.Test(t, resource.TestCase{

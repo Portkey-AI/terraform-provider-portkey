@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-04-25
+
+### Added
+- **Secret References** - New resource and data sources for external secret manager integration:
+  - `portkey_secret_reference` - Manage references to secrets in AWS Secrets Manager, Azure Key Vault, or HashiCorp Vault
+  - `portkey_secret_reference` (data source) - Look up a secret reference by slug
+  - `portkey_secret_references` (data source) - List secret references with optional filtering
+  - 9 typed auth blocks with plan-time validation (AWS access key, assumed role, service role; Azure Entra, managed identity; Vault token, AppRole, Kubernetes)
+  - Write-only credential support via `auth_version` rotation trigger for secrets that never touch Terraform state
+  - Workspace access control via `allow_all_workspaces` or `allowed_workspaces`
+- **Integration Secret Mappings** - `portkey_integration` now supports `secret_mappings` to dynamically resolve credentials from secret references instead of embedding them in config
+
 ## [0.2.17] - 2026-04-10
 
 ### Added
@@ -264,7 +276,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.19...HEAD
+[0.2.19]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.18...v0.2.19
+[0.2.18]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15

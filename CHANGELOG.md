@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-04-28
+
+### Fixed
+- **Integration Model Access Unmarshal Failure** - Fixed a blocking bug where
+  `portkey_integration_model_access` resources would fail on read-back after
+  creation with: `json: cannot unmarshal number into Go struct field
+  IntegrationModel.models.is_custom of type bool`. The Portkey API returns
+  `is_custom` and `is_finetune` as JSON numbers (`1`) or strings (`"false"`)
+  instead of booleans. Added a `FlexBool` type that handles all three
+  representations transparently.
+
+### Documentation
+- **Bedrock Integration Examples** - Fixed README examples:
+  - Corrected `ai_provider_id` from `"aws-bedrock"` to `"bedrock"`
+  - Added required `aws_auth_type = "assumedRole"` configuration field
+  - Documented `base_model_slug` requirement when using Application Inference
+    Profile ARNs as `model_slug`
+
+## [0.2.20] - 2026-04-27
+
 ### Added
 - **HTTP client retry on transient failures** - API requests that fail due
   to network errors or transient 5xx responses are now retried automatically
@@ -287,7 +307,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.21...HEAD
+[0.2.21]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.20...v0.2.21
+[0.2.20]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...v0.2.20
 [0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15

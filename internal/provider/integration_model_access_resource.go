@@ -351,7 +351,7 @@ func (r *integrationModelAccessResource) Delete(ctx context.Context, req resourc
 	}
 
 	// For custom models, use DELETE endpoint to fully remove
-	if model.IsCustom || state.IsCustom.ValueBool() {
+	if bool(model.IsCustom) || state.IsCustom.ValueBool() {
 		err = r.client.DeleteIntegrationModels(ctx, state.IntegrationID.ValueString(), []string{state.ModelSlug.ValueString()})
 		if err != nil {
 			// If not found during delete, resource is already gone - success
@@ -416,10 +416,10 @@ func buildModelUpdateRequest(ctx context.Context, plan *integrationModelAccessRe
 
 	// Set custom model flags
 	if !plan.IsCustom.IsNull() && !plan.IsCustom.IsUnknown() {
-		modelReq.IsCustom = plan.IsCustom.ValueBool()
+		modelReq.IsCustom = client.FlexBool(plan.IsCustom.ValueBool())
 	}
 	if !plan.IsFinetune.IsNull() && !plan.IsFinetune.IsUnknown() {
-		modelReq.IsFinetune = plan.IsFinetune.ValueBool()
+		modelReq.IsFinetune = client.FlexBool(plan.IsFinetune.ValueBool())
 	}
 	if !plan.BaseModelSlug.IsNull() && !plan.BaseModelSlug.IsUnknown() {
 		modelReq.BaseModelSlug = plan.BaseModelSlug.ValueString()
@@ -468,8 +468,8 @@ func mapModelToState(ctx context.Context, model *client.IntegrationModel, state 
 	var diags diag.Diagnostics
 
 	state.Enabled = types.BoolValue(model.Enabled)
-	state.IsCustom = types.BoolValue(model.IsCustom)
-	state.IsFinetune = types.BoolValue(model.IsFinetune)
+	state.IsCustom = types.BoolValue(bool(model.IsCustom))
+	state.IsFinetune = types.BoolValue(bool(model.IsFinetune))
 
 	if model.BaseModelSlug != "" {
 		state.BaseModelSlug = types.StringValue(model.BaseModelSlug)

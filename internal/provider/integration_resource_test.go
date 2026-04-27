@@ -110,7 +110,7 @@ func TestAccIntegrationResource_withConfigurations(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
 					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
-					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "aws-bedrock"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "bedrock"),
 					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
 				),
 			},
@@ -150,11 +150,12 @@ provider "portkey" {}
 
 resource "portkey_integration" "test" {
   name           = %[1]q
-  ai_provider_id = "aws-bedrock"
+  ai_provider_id = "bedrock"
 
   configurations = jsonencode({
-    aws_role_arn = "arn:aws:iam::123456789012:role/TestRole"
-    aws_region   = "us-east-1"
+    aws_auth_type = "assumedRole"
+    aws_role_arn  = "arn:aws:iam::123456789012:role/TestRole"
+    aws_region    = "us-east-1"
   })
 }
 `, name)

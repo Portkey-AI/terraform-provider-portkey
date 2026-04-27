@@ -339,7 +339,7 @@ Manages AI provider integrations (organization-level).
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `name` | String | Yes | Name of the integration |
-| `ai_provider_id` | String | Yes | Provider: `openai`, `anthropic`, `azure-openai`, `aws-bedrock`, etc. |
+| `ai_provider_id` | String | Yes | Provider: `openai`, `anthropic`, `azure-openai`, `bedrock`, etc. |
 | `key` | String | No | API key for the provider (write-only) |
 | `configurations` | String (JSON) | No | Provider-specific configurations (write-only) |
 | `description` | String | No | Description |
@@ -353,9 +353,10 @@ Manages AI provider integrations (organization-level).
 ```hcl
 resource "portkey_integration" "bedrock" {
   name           = "AWS Bedrock Production"
-  ai_provider_id = "aws-bedrock"
+  ai_provider_id = "bedrock"
   
   configurations = jsonencode({
+    aws_auth_type   = "assumedRole"       # Required for assume-role integrations
     aws_role_arn    = "arn:aws:iam::123456789012:role/PortkeyBedrockRole"
     aws_region      = "us-east-1"
     aws_external_id = "your-external-id"  # Optional
@@ -363,12 +364,14 @@ resource "portkey_integration" "bedrock" {
 }
 ```
 
+**Note**: When using Application Inference Profile ARNs as `model_slug` in `portkey_integration_model_access`, you must also set `base_model_slug` (format: `{region}.{bedrock_model_id}`, e.g. `global.anthropic.claude-sonnet-4-6`).
+
 ##### AWS Bedrock with Access Keys
 
 ```hcl
 resource "portkey_integration" "bedrock_keys" {
   name           = "AWS Bedrock (Access Keys)"
-  ai_provider_id = "aws-bedrock"
+  ai_provider_id = "bedrock"
   key            = var.aws_secret_access_key
   
   configurations = jsonencode({

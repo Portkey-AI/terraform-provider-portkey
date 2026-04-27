@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"os"
+	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -37,8 +38,9 @@ type portkeyProvider struct {
 
 // portkeyProviderModel maps provider schema data to a Go type.
 type portkeyProviderModel struct {
-	APIKey  types.String `tfsdk:"api_key"`
-	BaseURL types.String `tfsdk:"base_url"`
+	APIKey     types.String `tfsdk:"api_key"`
+	BaseURL    types.String `tfsdk:"base_url"`
+	MaxRetries types.Int64  `tfsdk:"max_retries"`
 }
 
 // Metadata returns the provider type name.
@@ -60,6 +62,12 @@ func (p *portkeyProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			"base_url": schema.StringAttribute{
 				Description: "Base URL for Portkey API. Defaults to https://api.portkey.ai/v1. Can be set via PORTKEY_BASE_URL for self-hosted deployments.",
 				Optional:    true,
+			},
+			"max_retries": schema.Int64Attribute{
+				Description: "Maximum number of retries for transient HTTP failures (network errors and 5xx responses). " +
+					"Must be a non-negative integer. Defaults to 4 (5 attempts total). Set to 0 to disable retries. " +
+					"Can also be set via the PORTKEY_MAX_RETRIES environment variable.",
+				Optional: true,
 			},
 		},
 	}
@@ -96,6 +104,15 @@ func (p *portkeyProvider) Configure(ctx context.Context, req provider.ConfigureR
 		)
 	}
 
+	if config.MaxRetries.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("max_retries"),
+			"Unknown Portkey Max Retries",
+			"The provider cannot create the Portkey API client as there is an unknown configuration value for max_retries. "+
+				"Either target apply the source of the value first, set the value statically in the configuration, or use the PORTKEY_MAX_RETRIES environment variable.",
+		)
+	}
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -105,6 +122,22 @@ func (p *portkeyProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	apiKey := os.Getenv("PORTKEY_API_KEY")
 	baseURL := os.Getenv("PORTKEY_BASE_URL")
+	// nil means "no override; use client package default". A pointer to 0
+	// is a deliberate "disable retries" — distinguishing this from the
+	// unset/default case is the reason maxRetries is *int rather than int.
+	var maxRetries *int
+	if envMaxRetries := os.Getenv("PORTKEY_MAX_RETRIES"); envMaxRetries != "" {
+		parsed, err := strconv.Atoi(envMaxRetries)
+		if err != nil || parsed < 0 {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("max_retries"),
+				"Invalid PORTKEY_MAX_RETRIES",
+				"PORTKEY_MAX_RETRIES must be a non-negative integer. Got: "+envMaxRetries,
+			)
+		} else {
+			maxRetries = &parsed
+		}
+	}
 
 	if !config.APIKey.IsNull() {
 		apiKey = config.APIKey.ValueString()
@@ -112,6 +145,20 @@ func (p *portkeyProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	if !config.BaseURL.IsNull() {
 		baseURL = config.BaseURL.ValueString()
+	}
+
+	if !config.MaxRetries.IsNull() {
+		v := config.MaxRetries.ValueInt64()
+		if v < 0 {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("max_retries"),
+				"Invalid max_retries",
+				"max_retries must be a non-negative integer.",
+			)
+		} else {
+			iv := int(v)
+			maxRetries = &iv
+		}
 	}
 
 	// If any of the expected configurations are missing, return
@@ -136,7 +183,11 @@ func (p *portkeyProvider) Configure(ctx context.Context, req provider.ConfigureR
 	}
 
 	// Create a new Portkey client using the configuration values
-	client, err := client.NewClient(baseURL, apiKey)
+	client, err := client.NewClientWithConfig(client.ClientConfig{
+		BaseURL:    baseURL,
+		APIKey:     apiKey,
+		MaxRetries: maxRetries,
+	})
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Unable to Create Portkey API Client",

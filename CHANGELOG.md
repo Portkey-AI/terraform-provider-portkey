@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **HTTP client retry on transient failures** - API requests that fail due
+  to network errors or transient 5xx responses are now retried automatically
+  with exponential backoff (500ms base, 5s cap, up to 4 retries by default).
+  4xx responses (except 429) are returned immediately. At scale, a single
+  transient 503 from the control plane would previously fail an entire
+  `terraform plan` or `apply`; this change makes the provider resilient to
+  ordinary upstream flakiness. Uses `hashicorp/go-retryablehttp`.
+- **`max_retries` provider attribute** - Tunes the retry count to match
+  deployment needs (e.g., reduce in fast-fail CI environments, increase
+  for slow networks). Falls back to the `PORTKEY_MAX_RETRIES` environment
+  variable; defaults to 4. Set to 0 to disable retries entirely. Follows
+  the same pattern as `hashicorp/terraform-provider-vault` (`max_retries`
+  + `VAULT_MAX_RETRIES`).
+- **Retry visibility under `TF_LOG=DEBUG`** - Retry attempts are now
+  logged via `terraform-plugin-log` at Debug level using the per-request
+  context, so they appear with the correct Terraform operation tagging.
+  By default (no `TF_LOG`), retries remain silent.
+- **`client.NewClientWithConfig`** - New constructor accepting a
+  `client.ClientConfig` struct for callers that need to set retry
+  behavior. The existing `client.NewClient(baseURL, apiKey)` is retained
+  as a thin wrapper for backwards compatibility.
+
 ## [0.2.17] - 2026-04-10
 
 ### Added

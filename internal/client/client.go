@@ -9,11 +9,26 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // JSONNull is a pre-encoded JSON null value for clearing fields via the API.
 // Use this with json.RawMessage fields to explicitly send "field": null.
 var JSONNull = json.RawMessage("null")
+
+// Retry configuration for transient failures against the Portkey Admin API.
+// The defaults apply to every request made through doRequest and cover
+// network errors, connection resets, and 5xx responses (except 501). 4xx
+// responses are returned to the caller immediately (except 429, which is
+// retried per retryablehttp.DefaultRetryPolicy).
+const (
+	defaultRetryMax       = 4
+	defaultRetryWaitMin   = 500 * time.Millisecond
+	defaultRetryWaitMax   = 5 * time.Second
+	defaultRequestTimeout = 30 * time.Second
+)
 
 // Client manages communication with the Portkey Admin API
 type Client struct {
@@ -22,21 +37,82 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// NewClient creates a new Portkey API client
+// ClientConfig controls how the Portkey API client connects and retries.
+//
+// MaxRetries == nil uses the package default (defaultRetryMax). A non-nil
+// pointer to 0 disables retries (single attempt). Negative values are
+// clamped to 0.
+//
+// Named ClientConfig (rather than Config) to avoid collision with the
+// existing Config type representing Portkey gateway configurations.
+type ClientConfig struct {
+	BaseURL    string
+	APIKey     string
+	MaxRetries *int
+}
+
+// NewClient creates a new Portkey API client with default retry settings.
+// Equivalent to NewClientWithConfig(ClientConfig{BaseURL: baseURL, APIKey: apiKey}).
 func NewClient(baseURL, apiKey string) (*Client, error) {
-	if baseURL == "" {
+	return NewClientWithConfig(ClientConfig{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+	})
+}
+
+// NewClientWithConfig creates a new Portkey API client. The returned
+// HTTP client transparently retries requests that fail with network
+// errors or transient 5xx responses using hashicorp/go-retryablehttp's
+// default retry policy with exponential backoff.
+//
+// Retry attempts (attempt > 0) are emitted via terraform-plugin-log's
+// tflog at Debug level using each request's context, so they appear
+// under TF_LOG=DEBUG with the proper Terraform operation context.
+func NewClientWithConfig(cfg ClientConfig) (*Client, error) {
+	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("base URL cannot be empty")
 	}
-	if apiKey == "" {
+	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("API key cannot be empty")
 	}
 
+	retryMax := defaultRetryMax
+	if cfg.MaxRetries != nil {
+		retryMax = *cfg.MaxRetries
+		if retryMax < 0 {
+			retryMax = 0
+		}
+	}
+
+	retryClient := retryablehttp.NewClient()
+	retryClient.RetryMax = retryMax
+	retryClient.RetryWaitMin = defaultRetryWaitMin
+	retryClient.RetryWaitMax = defaultRetryWaitMax
+	retryClient.HTTPClient.Timeout = defaultRequestTimeout
+	// Silence retryablehttp's default stderr logger; retry visibility
+	// is provided by RequestLogHook below, which uses each request's
+	// context for tflog so messages appear under TF_LOG=DEBUG with the
+	// correct Terraform operation context (rather than untagged stderr).
+	retryClient.Logger = nil
+	retryClient.RequestLogHook = func(_ retryablehttp.Logger, req *http.Request, attempt int) {
+		if attempt > 0 {
+			tflog.Debug(req.Context(), "retrying portkey API request", map[string]interface{}{
+				"method":  req.Method,
+				"path":    req.URL.Path,
+				"attempt": attempt,
+			})
+		}
+	}
+	// Return the final response on retry exhaustion instead of nil, so
+	// doRequest can surface the real status code and body in its error
+	// (e.g. "API request failed with status 503: ...") rather than a
+	// generic "giving up after N attempt(s)" message.
+	retryClient.ErrorHandler = retryablehttp.PassthroughErrorHandler
+
 	return &Client{
-		BaseURL: baseURL,
-		APIKey:  apiKey,
-		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		BaseURL:    cfg.BaseURL,
+		APIKey:     cfg.APIKey,
+		HTTPClient: retryClient.StandardClient(),
 	}, nil
 }
 

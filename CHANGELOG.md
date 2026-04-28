@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.22] - 2026-04-28
+
+### Added
+- **Users data source pagination** - `portkey_users` data source now auto-paginates
+  the underlying GET /admin/users endpoint to return all users in large organizations.
+  Previously the data source returned only the first page.
+- **Users data source server-side filters** - New `role` and `email` attributes allow
+  filtering users at the API level before results are returned.
+- **Users data source `page_size` attribute** - Optional tuning parameter to control
+  upstream page size (default 100). Larger values reduce round-trips for big orgs.
+- **Users data source `total` attribute** - Returns the API-reported total count of
+  matching users after filters are applied.
+
+## [0.2.21] - 2026-04-28
+
+### Fixed
+- **FlexBool polymorphic API responses** - Fixed handling of `is_custom` and `is_finetune`
+  fields that can be returned as either boolean or string by the Portkey API.
+- **AWS Bedrock documentation** - Corrected field names and examples for Bedrock integrations.
+
+## [0.2.20] - 2026-04-27
+
 ### Added
 - **HTTP client retry on transient failures** - API requests that fail due
   to network errors or transient 5xx responses are now retried automatically
@@ -29,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `client.ClientConfig` struct for callers that need to set retry
   behavior. The existing `client.NewClient(baseURL, apiKey)` is retained
   as a thin wrapper for backwards compatibility.
+
+## [0.2.19] - 2026-04-25
+
+### Added
+- **Secret references** - Support for referencing secrets in integrations
+  using the new `secret_reference` attribute pattern.
+
+## [0.2.18] - 2026-04-20
+
+### Fixed
+- Various stability improvements.
 
 ## [0.2.17] - 2026-04-10
 
@@ -287,7 +320,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.22...HEAD
+[0.2.22]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.21...v0.2.22
+[0.2.21]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.20...v0.2.21
+[0.2.20]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.19...v0.2.20
+[0.2.19]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.18...v0.2.19
+[0.2.18]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...v0.2.18
 [0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15

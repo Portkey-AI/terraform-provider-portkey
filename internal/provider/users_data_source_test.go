@@ -30,18 +30,26 @@ func TestAccUsersDataSource_basic(t *testing.T) {
 	})
 }
 
-// TestAccUsersDataSource_pagination forces a tiny upstream page size so the
-// data source must make multiple round-trips. The auto-paginated result must
-// still equal the reported total.
+// usersPaginationTestPageSize is the page size used by the pagination test.
+// Small enough that any organisation with more than ~10 users will exercise
+// the auto-pagination loop (multiple round-trips), large enough to keep the
+// test fast and to stay well clear of the usersDataSourceMaxPages safety cap
+// for realistic org sizes.
+const usersPaginationTestPageSize = 10
+
+// TestAccUsersDataSource_pagination uses a small upstream page size so the
+// data source makes multiple round-trips for any non-trivial org. The
+// auto-paginated result must still equal the reported total.
 func TestAccUsersDataSource_pagination(t *testing.T) {
+	pageSizeStr := strconv.Itoa(usersPaginationTestPageSize)
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccUsersDataSourceConfigPageSize(1),
+				Config: testAccUsersDataSourceConfigPageSize(usersPaginationTestPageSize),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr("data.portkey_users.paged", "page_size", "1"),
+					resource.TestCheckResourceAttr("data.portkey_users.paged", "page_size", pageSizeStr),
 					resource.TestCheckResourceAttrSet("data.portkey_users.paged", "users.#"),
 					resource.TestCheckResourceAttrSet("data.portkey_users.paged", "total"),
 					testAccCheckUsersDataSourceCountMatchesTotal("data.portkey_users.paged"),
@@ -101,8 +109,12 @@ func TestAccUsersDataSource_invalidRole(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccUsersDataSourceConfigRole("superuser"),
-				ExpectError: regexp.MustCompile(`(?i)attribute role value must be one of`),
+				Config: testAccUsersDataSourceConfigRole("superuser"),
+				// Loose regex: just confirm the diagnostic mentions `role` and
+				// `one of`. Avoids depending on exact wording (which has shifted
+				// across terraform-plugin-framework releases — older versions
+				// say "Attribute %q value …", newer use "Attribute %q must …").
+				ExpectError: regexp.MustCompile(`(?is)role.*one of`),
 			},
 		},
 	})
@@ -116,8 +128,11 @@ func TestAccUsersDataSource_pageSizeBelowMinimum(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccUsersDataSourceConfigPageSize(0),
-				ExpectError: regexp.MustCompile(`(?i)attribute page_size value must be at least 1`),
+				Config: testAccUsersDataSourceConfigPageSize(0),
+				// Loose regex: just confirm the diagnostic mentions `page_size`
+				// and `at least 1`. Same reasoning as the role case above —
+				// the framework's exact wording is not stable across versions.
+				ExpectError: regexp.MustCompile(`(?is)page_size.*at least 1`),
 			},
 		},
 	})

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -297,21 +298,63 @@ func (c *Client) GetUser(ctx context.Context, id string) (*User, error) {
 	return &user, nil
 }
 
-// ListUsers retrieves all users
-func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
-	respBody, err := c.doRequest(ctx, http.MethodGet, "/admin/users", nil)
+// ListUsersOptions captures optional query parameters for GET /admin/users.
+//
+// PageSize/CurrentPage map to the API's pageSize/currentPage query params
+// (note: camelCase, matching the OpenAPI spec). Role and Email are optional
+// server-side filters.
+type ListUsersOptions struct {
+	PageSize    int
+	CurrentPage int
+	Role        string
+	Email       string
+}
+
+// ListUsersResponse is the full response from GET /admin/users.
+type ListUsersResponse struct {
+	Object string `json:"object"`
+	Total  int    `json:"total"`
+	Data   []User `json:"data"`
+}
+
+// ListUsersPaginated retrieves users from the Portkey Admin API with optional
+// pagination and filter parameters. Callers auto-paginate by incrementing
+// opts.CurrentPage until the returned page is shorter than opts.PageSize.
+//
+// The query parameter names use the camelCase form documented in the Portkey
+// OpenAPI spec ("pageSize"/"currentPage"); other list endpoints in this
+// codebase use snake_case so they are intentionally not abstracted into a
+// shared helper.
+func (c *Client) ListUsersPaginated(ctx context.Context, opts ListUsersOptions) (*ListUsersResponse, error) {
+	path := "/admin/users"
+	var params []string
+	if opts.PageSize > 0 {
+		params = append(params, fmt.Sprintf("pageSize=%d", opts.PageSize))
+	}
+	if opts.CurrentPage > 0 {
+		params = append(params, fmt.Sprintf("currentPage=%d", opts.CurrentPage))
+	}
+	if opts.Role != "" {
+		params = append(params, "role="+url.QueryEscape(opts.Role))
+	}
+	if opts.Email != "" {
+		params = append(params, "email="+url.QueryEscape(opts.Email))
+	}
+	if len(params) > 0 {
+		path += "?" + strings.Join(params, "&")
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var response struct {
-		Data []User `json:"data"`
-	}
+	var response ListUsersResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("error unmarshaling response: %w", err)
 	}
 
-	return response.Data, nil
+	return &response, nil
 }
 
 // UpdateUserRequest represents the request to update a user

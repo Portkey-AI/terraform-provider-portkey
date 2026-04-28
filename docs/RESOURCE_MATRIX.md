@@ -43,7 +43,7 @@
 | `portkey_workspace` | ✅ | - | Working | ✅ 3 tests |
 | `portkey_workspaces` | - | ✅ | Working | ✅ 2 tests |
 | `portkey_user` | ✅ | - | Working | Passing |
-| `portkey_users` | - | ✅ | Working | Passing |
+| `portkey_users` | - | ✅ | Working | ✅ 6 tests |
 | `portkey_integration` | ✅ | - | Working | ✅ Passing |
 | `portkey_integrations` | - | ✅ | Working | ✅ Passing |
 | `portkey_api_key` | ✅ | - | Working | ✅ 3 tests |

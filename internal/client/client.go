@@ -318,12 +318,16 @@ type ListUsersResponse struct {
 }
 
 // ListUsersPaginated retrieves users from the Portkey Admin API with optional
-// pagination and filter parameters. Callers should typically auto-paginate by
-// incrementing opts.CurrentPage until the returned page is shorter than
-// opts.PageSize.
+// pagination and filter parameters. Callers auto-paginate by incrementing
+// opts.CurrentPage until the returned page is shorter than opts.PageSize.
+//
+// The query parameter names use the camelCase form documented in the Portkey
+// OpenAPI spec ("pageSize"/"currentPage"); other list endpoints in this
+// codebase use snake_case so they are intentionally not abstracted into a
+// shared helper.
 func (c *Client) ListUsersPaginated(ctx context.Context, opts ListUsersOptions) (*ListUsersResponse, error) {
 	path := "/admin/users"
-	params := []string{}
+	var params []string
 	if opts.PageSize > 0 {
 		params = append(params, fmt.Sprintf("pageSize=%d", opts.PageSize))
 	}
@@ -351,17 +355,6 @@ func (c *Client) ListUsersPaginated(ctx context.Context, opts ListUsersOptions) 
 	}
 
 	return &response, nil
-}
-
-// ListUsers retrieves the first page of users from the Portkey Admin API
-// using the API's default page size. Retained for backwards compatibility;
-// new callers should prefer ListUsersPaginated for full result sets.
-func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
-	resp, err := c.ListUsersPaginated(ctx, ListUsersOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return resp.Data, nil
 }
 
 // UpdateUserRequest represents the request to update a user

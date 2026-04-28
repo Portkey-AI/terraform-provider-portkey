@@ -70,6 +70,29 @@ func TestAccUsersDataSource_roleFilter(t *testing.T) {
 	})
 }
 
+// TestAccUsersDataSource_emailFilter verifies the email server-side filter
+// is forwarded to the API. It first reads every user (no filter) to discover
+// a real email, then re-queries with that email and asserts the result is a
+// single user matching by id. This proves the filter is applied server-side
+// rather than client-side after auto-pagination.
+func TestAccUsersDataSource_emailFilter(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUsersDataSourceConfigEmailFilter(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckUsersDataSourceEmailFilterMatchesAll(
+						"data.portkey_users.by_email",
+						"data.portkey_users.all",
+					),
+				),
+			},
+		},
+	})
+}
+
 // TestAccUsersDataSource_invalidRole verifies the schema validator rejects
 // values outside the {admin, member, owner} enum at plan time.
 func TestAccUsersDataSource_invalidRole(t *testing.T) {
@@ -85,16 +108,16 @@ func TestAccUsersDataSource_invalidRole(t *testing.T) {
 	})
 }
 
-// TestAccUsersDataSource_pageSizeOutOfRange verifies the validator catches
-// page_size values outside the allowed 1-1000 window.
-func TestAccUsersDataSource_pageSizeOutOfRange(t *testing.T) {
+// TestAccUsersDataSource_pageSizeBelowMinimum verifies the validator rejects
+// page_size values below the minimum (1) at plan time.
+func TestAccUsersDataSource_pageSizeBelowMinimum(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccUsersDataSourceConfigPageSize(0),
-				ExpectError: regexp.MustCompile(`(?i)attribute page_size value must be between`),
+				ExpectError: regexp.MustCompile(`(?i)attribute page_size value must be at least 1`),
 			},
 		},
 	})
@@ -132,6 +155,22 @@ data "portkey_users" "by_role" {
 `, role)
 }
 
+// testAccUsersDataSourceConfigEmailFilter loads every user (no filter) and
+// then queries again using the first user's email. The chained reference
+// forces Terraform to read `all` first and feed `by_email` from its output,
+// exercising the email server-side filter end-to-end.
+func testAccUsersDataSourceConfigEmailFilter() string {
+	return `
+provider "portkey" {}
+
+data "portkey_users" "all" {}
+
+data "portkey_users" "by_email" {
+  email = data.portkey_users.all.users[0].email
+}
+`
+}
+
 // ----------------------------------------------------------------------------
 // Custom check functions
 // ----------------------------------------------------------------------------
@@ -157,8 +196,47 @@ func testAccCheckUsersDataSourceCountMatchesTotal(name string) resource.TestChec
 	}
 }
 
+// testAccCheckUsersDataSourceEmailFilterMatchesAll asserts that the filtered
+// data source returned exactly one user whose id matches users[0] from the
+// unfiltered data source. This proves the email filter is forwarded to the
+// API rather than being applied client-side after auto-pagination.
+func testAccCheckUsersDataSourceEmailFilterMatchesAll(filteredName, allName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		filtered, ok := s.RootModule().Resources[filteredName]
+		if !ok {
+			return fmt.Errorf("data source %q not found in state", filteredName)
+		}
+		all, ok := s.RootModule().Resources[allName]
+		if !ok {
+			return fmt.Errorf("data source %q not found in state", allName)
+		}
+		// The filter targets a known-existing email, so the result MUST be a
+		// single user.
+		if got := filtered.Primary.Attributes["users.#"]; got != "1" {
+			return fmt.Errorf("data source %q: expected users.# = 1 (one match for the filter), got %q", filteredName, got)
+		}
+		if got := filtered.Primary.Attributes["total"]; got != "1" {
+			return fmt.Errorf("data source %q: expected total = 1, got %q", filteredName, got)
+		}
+		// And that single user must be the same record we read from the
+		// unfiltered data source — id is stable across calls.
+		wantID := all.Primary.Attributes["users.0.id"]
+		gotID := filtered.Primary.Attributes["users.0.id"]
+		if wantID == "" {
+			return fmt.Errorf("data source %q: users.0.id was empty — cannot verify", allName)
+		}
+		if wantID != gotID {
+			return fmt.Errorf("data source %q: filtered users.0.id = %q, expected %q (same as %s.users.0.id)",
+				filteredName, gotID, wantID, allName)
+		}
+		return nil
+	}
+}
+
 // testAccCheckUsersDataSourceAllHaveRole asserts every returned user has the
-// expected role (proving the server-side filter is forwarded correctly).
+// expected role (proving the server-side filter is forwarded correctly) and
+// that at least one user matched (otherwise the loop trivially passes and
+// proves nothing).
 func testAccCheckUsersDataSourceAllHaveRole(name, expected string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[name]
@@ -169,6 +247,9 @@ func testAccCheckUsersDataSourceAllHaveRole(name, expected string) resource.Test
 		count, err := strconv.Atoi(countStr)
 		if err != nil {
 			return fmt.Errorf("data source %q: could not parse users.# = %q: %w", name, countStr, err)
+		}
+		if count == 0 {
+			return fmt.Errorf("data source %q: expected at least one user with role %q, got 0 — cannot verify filter", name, expected)
 		}
 		for i := 0; i < count; i++ {
 			gotRole := rs.Primary.Attributes["users."+strconv.Itoa(i)+".role"]

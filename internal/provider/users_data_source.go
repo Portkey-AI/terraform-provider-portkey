@@ -13,14 +13,14 @@ import (
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
 
-// Page-traversal safety cap. The Portkey API caps pageSize at 1000 and most
-// organizations have far fewer than a million users; if we ever hit this we
-// will return what we have plus a clear error message rather than spinning.
+// usersDataSourceMaxPages is the page-traversal safety cap. With a default
+// page size of 100 this allows up to 100k users; larger orgs are extremely
+// unlikely and we surface a clear error rather than spinning indefinitely.
 const usersDataSourceMaxPages = 1000
 
-// Default page size used when the user does not specify page_size. The API
-// itself defaults to a smaller window, but pulling 100 at a time minimises
-// the round-trips needed to list a typical organisation.
+// usersDataSourceDefaultPageSize is the default page size used when the user
+// does not specify page_size. 100 minimises round-trips for typical orgs
+// while staying well within Portkey API per-request limits.
 const usersDataSourceDefaultPageSize = 100
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -76,10 +76,10 @@ func (d *usersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 			"page_size": schema.Int64Attribute{
 				Description: fmt.Sprintf("Page size for upstream API calls. Defaults to %d. The data source paginates "+
 					"transparently — increasing this value reduces the number of round-trips for large organizations. "+
-					"Valid range: 1-1000.", usersDataSourceDefaultPageSize),
+					"Must be at least 1.", usersDataSourceDefaultPageSize),
 				Optional: true,
 				Validators: []validator.Int64{
-					int64validator.Between(1, 1000),
+					int64validator.AtLeast(1),
 				},
 			},
 			"role": schema.StringAttribute{
@@ -123,7 +123,7 @@ func (d *usersDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 							Computed:    true,
 						},
 						"updated_at": schema.StringAttribute{
-							Description: "Timestamp when the user was last updated.",
+							Description: "Timestamp when the user was last updated. Null if the user has never been updated.",
 							Computed:    true,
 						},
 					},
@@ -167,14 +167,18 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		pageSize = int(state.PageSize.ValueInt64())
 	}
 
-	opts := client.ListUsersOptions{
-		PageSize: pageSize,
-		Role:     state.Role.ValueString(),
-		Email:    state.Email.ValueString(),
+	opts := client.ListUsersOptions{PageSize: pageSize}
+	if !state.Role.IsNull() && !state.Role.IsUnknown() {
+		opts.Role = state.Role.ValueString()
+	}
+	if !state.Email.IsNull() && !state.Email.IsUnknown() {
+		opts.Email = state.Email.ValueString()
 	}
 
+	// Initialise as empty (non-nil) slice so callers can safely call length()
+	// on the attribute even when the result set is empty.
 	state.Users = []userModel{}
-	var lastTotal int
+	totalCaptured := false
 
 	for page := 0; page < usersDataSourceMaxPages; page++ {
 		opts.CurrentPage = page
@@ -186,28 +190,52 @@ func (d *usersDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 			)
 			return
 		}
-		lastTotal = apiResp.Total
+
+		// Capture total from the first response only — the API returns the
+		// same total on every page, and we want to record the value as the
+		// API saw it at the start of the traversal.
+		if !totalCaptured {
+			state.Total = types.Int64Value(int64(apiResp.Total))
+			totalCaptured = true
+		}
 
 		for _, u := range apiResp.Data {
-			state.Users = append(state.Users, userModel{
+			item := userModel{
 				ID:        types.StringValue(u.ID),
 				Email:     types.StringValue(u.Email),
 				Role:      types.StringValue(u.Role),
 				Status:    types.StringValue(u.Status),
 				CreatedAt: types.StringValue(u.CreatedAt.Format("2006-01-02T15:04:05Z07:00")),
-				UpdatedAt: types.StringValue(u.UpdatedAt.Format("2006-01-02T15:04:05Z07:00")),
-			})
+			}
+			// The Portkey API may omit updated_at for users that have never
+			// been modified. Mirror the project-wide convention of returning
+			// null (not the Go zero time) so the attribute is unambiguous.
+			if !u.UpdatedAt.IsZero() {
+				item.UpdatedAt = types.StringValue(u.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+			} else {
+				item.UpdatedAt = types.StringNull()
+			}
+			state.Users = append(state.Users, item)
 		}
 
 		// Last page reached when the API returns fewer than the requested
 		// page size (or zero rows on the very first request).
 		if len(apiResp.Data) < pageSize {
-			break
+			diags = resp.State.Set(ctx, &state)
+			resp.Diagnostics.Append(diags...)
+			return
 		}
 	}
 
-	state.Total = types.Int64Value(int64(lastTotal))
-
-	diags = resp.State.Set(ctx, &state)
-	resp.Diagnostics.Append(diags...)
+	// Reached the safety cap without seeing a short page — surface the
+	// truncation explicitly instead of silently returning a partial list.
+	resp.Diagnostics.AddError(
+		"Too Many User Pages",
+		fmt.Sprintf(
+			"Stopped paginating after %d pages of size %d (collected %d users) — "+
+				"the result set is larger than expected. Increase page_size or contact "+
+				"the provider maintainers if this is a legitimate scenario.",
+			usersDataSourceMaxPages, pageSize, len(state.Users),
+		),
+	)
 }

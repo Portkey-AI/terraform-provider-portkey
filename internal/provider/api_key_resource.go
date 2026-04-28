@@ -63,8 +63,18 @@ type apiKeyResourceModel struct {
 	LastResetAt         types.String `tfsdk:"last_reset_at"`
 	ResetUsage          types.Bool   `tfsdk:"reset_usage"`
 	RotationPolicy      types.Object `tfsdk:"rotation_policy"`
-	CreatedAt           types.String `tfsdk:"created_at"`
-	UpdatedAt           types.String `tfsdk:"updated_at"`
+	// RotateTrigger is a user-controlled string that triggers an on-demand key
+	// rotation when its value changes during an Update. Setting it on Create has
+	// no effect; the value is stored in state for future bumps.
+	RotateTrigger types.String `tfsdk:"rotate_trigger"`
+	// RotateTransitionPeriodMs is the optional transition window (in ms) sent
+	// with the next on-demand rotation. Only consulted when rotate_trigger fires.
+	RotateTransitionPeriodMs types.Int64 `tfsdk:"rotate_transition_period_ms"`
+	// KeyTransitionExpiresAt is the API-returned cut-off for the previous key
+	// after the most recent on-demand rotation. Null until a rotation occurs.
+	KeyTransitionExpiresAt types.String `tfsdk:"key_transition_expires_at"`
+	CreatedAt              types.String `tfsdk:"created_at"`
+	UpdatedAt              types.String `tfsdk:"updated_at"`
 }
 
 // Metadata returns the resource type name.
@@ -355,13 +365,34 @@ func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 				!cAttrs["key_transition_period_ms"].Equal(pAttrs["key_transition_period_ms"])
 		}
 
-		if scalarChange || rotationChange {
+		// -------------------------------------------------------------------------
+		// 10. rotate_trigger: bumping the trigger value calls the /rotate endpoint
+		//     during Update, which returns a new `key` and a fresh
+		//     `key_transition_expires_at`. Mark those Computed attributes Unknown
+		//     so the post-apply state can carry the API-returned values without
+		//     producing an "inconsistent result" error.
+		//
+		//     Detection rule (Update only — Create never rotates):
+		//       • The trigger value changed AND the new value is non-null.
+		//       • A null→value transition fires rotation (user explicitly
+		//         opting in to rotate). A value→null transition does not.
+		// -------------------------------------------------------------------------
+		rotateTriggered := !config.RotateTrigger.Equal(priorState.RotateTrigger) &&
+			!config.RotateTrigger.IsNull() && !config.RotateTrigger.IsUnknown()
+
+		if scalarChange || rotationChange || rotateTriggered {
 			resp.Plan.SetAttribute(ctx, path.Root("updated_at"), types.StringUnknown())
 		}
 		if rotationChange {
 			// next_rotation_at is recomputed by the API on every rotation_policy
 			// change. Mark it Unknown so the actual API-returned date is accepted.
 			resp.Plan.SetAttribute(ctx, path.Root("rotation_policy").AtName("next_rotation_at"), types.StringUnknown())
+		}
+		if rotateTriggered {
+			// key and key_transition_expires_at are both refreshed by the rotate
+			// call. UseStateForUnknown would otherwise carry the stale prior values.
+			resp.Plan.SetAttribute(ctx, path.Root("key"), types.StringUnknown())
+			resp.Plan.SetAttribute(ctx, path.Root("key_transition_expires_at"), types.StringUnknown())
 		}
 	}
 }
@@ -624,6 +655,37 @@ API Key Types:
 							int64validator.AtLeast(1800000),
 						},
 					},
+				},
+			},
+			"rotate_trigger": schema.StringAttribute{
+				Description: "User-controlled trigger string for on-demand key rotation (`POST /api-keys/{id}/rotate`). " +
+					"Setting this on a new resource has no effect — the value is recorded in state. " +
+					"Changing it on an existing resource (any new string, e.g. a timestamp, version tag, or hash) " +
+					"calls the rotate endpoint during the next apply: a new key value is issued, the old key " +
+					"remains valid for the transition period, and `key` / `key_transition_expires_at` are refreshed. " +
+					"WARNING: do NOT bind this to a value that changes every plan (e.g. `timestamp()`); " +
+					"that would rotate the key on every apply and may break consumers still holding the previous value.",
+				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+			},
+			"rotate_transition_period_ms": schema.Int64Attribute{
+				Description: "Optional transition period (in milliseconds) applied the next time `rotate_trigger` fires. " +
+					"Determines how long the previous key value keeps working after an on-demand rotation. " +
+					"Minimum 1800000 (30 minutes), per the Portkey API spec. " +
+					"Independent of `rotation_policy.key_transition_period_ms`, which governs scheduled rotations.",
+				Optional: true,
+				Validators: []validator.Int64{
+					int64validator.AtLeast(1800000),
+				},
+			},
+			"key_transition_expires_at": schema.StringAttribute{
+				Description: "Timestamp (RFC3339) at which the previous key value stops being accepted after the most recent " +
+					"on-demand rotation. Populated only after `rotate_trigger` has fired at least once; null otherwise.",
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"created_at": schema.StringAttribute{
@@ -954,6 +1016,12 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	// plan.ResetUsage already holds the config value from req.Plan.Get above —
 	// keep it so the post-apply state matches the plan (avoids "inconsistent result").
 
+	// rotate_trigger and rotate_transition_period_ms already hold the config
+	// values from req.Plan.Get above. They are user-driven inputs; Create never
+	// triggers a rotation (the key is fresh).
+	// key_transition_expires_at: Computed with no rotation yet → must be null.
+	plan.KeyTransitionExpiresAt = types.StringNull()
+
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -1196,6 +1264,12 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	// reset_usage = true in HCL and Read zeroes it out, Terraform would see
 	// a diff (config=true, state=null) on every refresh → non-empty plan.
 	// The value only transitions true→null when the user removes it from HCL.
+
+	// rotate_trigger, rotate_transition_period_ms, and key_transition_expires_at
+	// are NOT returned by GET /api-keys/{id}. They are managed locally:
+	//   - rotate_trigger / rotate_transition_period_ms: user inputs, preserved as-is.
+	//   - key_transition_expires_at: populated only by RotateAPIKey responses.
+	// Leaving the existing state values untouched ensures Read does not zero them.
 
 	// Set refreshed state
 	diags = resp.State.Set(ctx, &state)
@@ -1554,6 +1628,78 @@ func (r *apiKeyResource) Update(ctx context.Context, req resource.UpdateRequest,
 			}
 			plan.AlertEmails = alertEmailsList
 		}
+	}
+
+	// -------------------------------------------------------------------------
+	// On-demand rotation (POST /api-keys/{id}/rotate).
+	//
+	// Fires when the user-controlled rotate_trigger string changes between the
+	// prior state and the new config (null→value also counts; value→null does
+	// not). Mirrors the detection used in ModifyPlan so the Computed attributes
+	// it marked Unknown — `key`, `key_transition_expires_at`, `updated_at` —
+	// match what we set here.
+	//
+	// Order: any field-level UpdateAPIKey changes are applied first (above);
+	// the rotation runs last so the new key value and transition timestamp
+	// returned by /rotate become the final state.
+	// -------------------------------------------------------------------------
+	rotateTriggered := !config.RotateTrigger.Equal(state.RotateTrigger) &&
+		!config.RotateTrigger.IsNull() && !config.RotateTrigger.IsUnknown()
+
+	if rotateTriggered {
+		var rotateReq *client.RotateAPIKeyRequest
+		if !plan.RotateTransitionPeriodMs.IsNull() && !plan.RotateTransitionPeriodMs.IsUnknown() {
+			v := int(plan.RotateTransitionPeriodMs.ValueInt64())
+			rotateReq = &client.RotateAPIKeyRequest{KeyTransitionPeriodMs: &v}
+		}
+
+		rotateResp, err := r.client.RotateAPIKey(ctx, state.ID.ValueString(), rotateReq)
+		if err != nil {
+			detail := fmt.Sprintf("Could not rotate API key %s: %s", state.ID.ValueString(), err.Error())
+			// 403 from this endpoint almost always means the calling Admin
+			// API key is missing the matching `*_api_keys.update` scope.
+			// Surface that hint directly so the user doesn't have to dig.
+			if strings.Contains(err.Error(), "403") {
+				detail += "\n\nHint: rotating a key requires the calling Admin API Key to have " +
+					"the matching update scope (organisation_service_api_keys.update, " +
+					"workspace_service_api_keys.update, or workspace_user_api_keys.update). " +
+					"Update the Admin Key's scopes in the Portkey dashboard and re-apply."
+			}
+			resp.Diagnostics.AddError("Error Rotating Portkey API Key", detail)
+			return
+		}
+
+		plan.Key = types.StringValue(rotateResp.Key)
+		if rotateResp.KeyTransitionExpiresAt != "" {
+			plan.KeyTransitionExpiresAt = types.StringValue(rotateResp.KeyTransitionExpiresAt)
+		} else {
+			// API may omit the field when no transition period is in effect.
+			plan.KeyTransitionExpiresAt = types.StringNull()
+		}
+
+		// The /rotate response does not include the updated last_updated_at
+		// timestamp. Re-fetch the API key so updated_at reflects the rotation.
+		// Without this, Terraform's ModifyPlan marked updated_at Unknown but the
+		// post-apply value would carry the pre-rotation timestamp from
+		// UpdateAPIKey above, producing user-visible drift on the next refresh.
+		refreshed, refreshErr := r.client.GetAPIKey(ctx, state.ID.ValueString())
+		if refreshErr != nil {
+			resp.Diagnostics.AddError(
+				"Error Reading Portkey API Key after rotation",
+				fmt.Sprintf("API key %s rotated successfully, but refreshing it failed: %s",
+					state.ID.ValueString(), refreshErr.Error()),
+			)
+			return
+		}
+		if !refreshed.UpdatedAt.IsZero() {
+			plan.UpdatedAt = types.StringValue(refreshed.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
+		}
+	} else {
+		// No rotation: preserve the prior key_transition_expires_at value from
+		// state. plan.KeyTransitionExpiresAt currently holds the
+		// UseStateForUnknown carry-over, but make the intent explicit so future
+		// edits don't accidentally null it out.
+		plan.KeyTransitionExpiresAt = state.KeyTransitionExpiresAt
 	}
 
 	diags = resp.State.Set(ctx, plan)

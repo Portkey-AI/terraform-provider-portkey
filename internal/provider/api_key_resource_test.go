@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccAPIKeyResource_basic(t *testing.T) {
@@ -1150,4 +1151,203 @@ resource "portkey_api_key" "test" {
   }
 }
 `, name)
+}
+
+// ----------------------------------------------------------------------------
+// On-demand rotation tests (POST /api-keys/{id}/rotate via rotate_trigger)
+// ----------------------------------------------------------------------------
+
+// TestAccAPIKeyResource_rotateTrigger verifies the on-demand rotation flow:
+//   - Creating a key with rotate_trigger set does NOT call the rotate endpoint
+//     (the key is fresh; the trigger is just recorded in state).
+//   - key_transition_expires_at is null until a rotation actually occurs.
+//   - Bumping the trigger string fires /rotate: the `key` value changes and
+//     key_transition_expires_at is populated by the API response.
+//   - Subsequent applies without trigger changes are a no-op (no spurious
+//     plans, no re-rotation).
+//   - Removing rotate_trigger does NOT trigger another rotation.
+func TestAccAPIKeyResource_rotateTrigger(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-rotate")
+
+	// Capture the key value before and after rotation so we can assert it
+	// actually changes. terraform-plugin-testing has no built-in CheckResource
+	// helper that compares two attribute values across steps, so we read state
+	// inside the check funcs.
+	var keyBefore, keyAfter string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Create with rotate_trigger = "v1". No rotation; the
+			// trigger value is just recorded in state.
+			{
+				Config: testAccAPIKeyResourceConfigWithRotateTrigger(name, "v1", 0),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "id"),
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "key"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotate_trigger", "v1"),
+					// No rotation has happened yet → key_transition_expires_at must be null.
+					resource.TestCheckNoResourceAttr("portkey_api_key.test", "key_transition_expires_at"),
+					// Capture the original key for later comparison.
+					testAccCheckAPIKeyCaptureKey("portkey_api_key.test", &keyBefore),
+				),
+			},
+			// Step 2: PlanOnly with the same config — must produce an empty plan.
+			// Confirms rotate_trigger doesn't keep firing on every plan.
+			{
+				Config:   testAccAPIKeyResourceConfigWithRotateTrigger(name, "v1", 0),
+				PlanOnly: true,
+			},
+			// Step 3: Bump the trigger to "v2" with an explicit transition
+			// period (30 minutes — the API minimum). This must call /rotate:
+			// the key changes and key_transition_expires_at is populated.
+			{
+				Config: testAccAPIKeyResourceConfigWithRotateTrigger(name, "v2", 1800000),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotate_trigger", "v2"),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotate_transition_period_ms", "1800000"),
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "key_transition_expires_at"),
+					testAccCheckAPIKeyCaptureKey("portkey_api_key.test", &keyAfter),
+					testAccCheckAPIKeyValueChanged(&keyBefore, &keyAfter),
+				),
+			},
+			// Step 4: PlanOnly after rotation — empty plan, key_transition_expires_at preserved.
+			{
+				Config:   testAccAPIKeyResourceConfigWithRotateTrigger(name, "v2", 1800000),
+				PlanOnly: true,
+			},
+			// Step 5: Remove rotate_trigger from config. value→null does NOT
+			// rotate; we expect no error. (The plan IS non-empty because
+			// removing an Optional attribute is a real diff; that is correct.)
+			{
+				Config:             testAccAPIKeyResourceConfigBasicWithScopes(name),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_rotateTriggerBelowMinTransition verifies that
+// rotate_transition_period_ms below the API's 30-minute minimum is rejected
+// at plan time by the schema validator (no API call is made).
+func TestAccAPIKeyResource_rotateTriggerBelowMinTransition(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-rotmin")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAPIKeyResourceConfigWithRotateTrigger(name, "v1", 60000), // 1 minute
+				ExpectError: regexp.MustCompile(`(?i)1800000`),
+			},
+		},
+	})
+}
+
+// TestAccAPIKeyResource_rotateTriggerWithRename verifies that a single Update
+// can both rename the key (regular field change) and rotate it: the regular
+// fields are persisted via UpdateAPIKey first, then /rotate runs to refresh
+// the key value.
+func TestAccAPIKeyResource_rotateTriggerWithRename(t *testing.T) {
+	name := acctest.RandomWithPrefix("tf-acc-ak-rotren")
+	nameUpdated := name + "-upd"
+
+	var keyBefore, keyAfter string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAPIKeyResourceConfigWithRotateTrigger(name, "v1", 0),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckAPIKeyCaptureKey("portkey_api_key.test", &keyBefore),
+				),
+			},
+			{
+				Config: testAccAPIKeyResourceConfigWithRotateTrigger(nameUpdated, "v2", 1800000),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_api_key.test", "name", nameUpdated),
+					resource.TestCheckResourceAttr("portkey_api_key.test", "rotate_trigger", "v2"),
+					resource.TestCheckResourceAttrSet("portkey_api_key.test", "key_transition_expires_at"),
+					testAccCheckAPIKeyCaptureKey("portkey_api_key.test", &keyAfter),
+					testAccCheckAPIKeyValueChanged(&keyBefore, &keyAfter),
+				),
+			},
+		},
+	})
+}
+
+// testAccCheckAPIKeyCaptureKey records the current `key` attribute of the
+// resource into the supplied destination so a later step can compare it.
+func testAccCheckAPIKeyCaptureKey(resourceName string, dest *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource %s not found in state", resourceName)
+		}
+		v, ok := rs.Primary.Attributes["key"]
+		if !ok {
+			return fmt.Errorf("resource %s has no `key` attribute", resourceName)
+		}
+		if v == "" {
+			return fmt.Errorf("resource %s has empty `key` attribute", resourceName)
+		}
+		*dest = v
+		return nil
+	}
+}
+
+// testAccCheckAPIKeyValueChanged asserts that two captured key values differ.
+// Used to confirm that an on-demand rotation actually issued a new key.
+func testAccCheckAPIKeyValueChanged(before, after *string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		if *before == "" {
+			return fmt.Errorf("`before` key was never captured (empty)")
+		}
+		if *after == "" {
+			return fmt.Errorf("`after` key was never captured (empty)")
+		}
+		if *before == *after {
+			return fmt.Errorf("expected key value to change after rotation, but both before and after equal %q", *before)
+		}
+		return nil
+	}
+}
+
+// testAccAPIKeyResourceConfigBasicWithScopes renders the minimal valid
+// config used by the rotation tests. scopes is required by the API for
+// organisation-service keys.
+func testAccAPIKeyResourceConfigBasicWithScopes(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+}
+`, name)
+}
+
+// testAccAPIKeyResourceConfigWithRotateTrigger renders a config with a
+// rotate_trigger value. When transitionMs is 0, rotate_transition_period_ms
+// is omitted from the config so the API uses its default transition period.
+func testAccAPIKeyResourceConfigWithRotateTrigger(name, trigger string, transitionMs int) string {
+	transitionLine := ""
+	if transitionMs > 0 {
+		transitionLine = fmt.Sprintf("  rotate_transition_period_ms = %d\n", transitionMs)
+	}
+	return fmt.Sprintf(`
+resource "portkey_api_key" "test" {
+  name     = %[1]q
+  type     = "organisation"
+  sub_type = "service"
+  scopes   = ["providers.list"]
+
+  rotate_trigger = %[2]q
+%[3]s}
+`, name, trigger, transitionLine)
 }

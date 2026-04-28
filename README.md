@@ -676,6 +676,8 @@ Manages Portkey API keys (organization-scoped or workspace-scoped).
 | `usage_limits` | Object | No | See [usage_limits](#usage_limits) below |
 | `rate_limits` | List(Object) | No | See [rate_limits](#rate_limits) below |
 | `rotation_policy` | Object | No | See [rotation_policy](#rotation_policy) below |
+| `rotate_trigger` | String | No | Change-detected trigger for on-demand rotation (`POST /api-keys/{id}/rotate`). Bumping its value calls the rotate endpoint and refreshes `key`/`key_transition_expires_at`. See [On-Demand Rotation](#on-demand-rotation) below |
+| `rotate_transition_period_ms` | Number | No | Optional transition window (ms) applied the next time `rotate_trigger` fires. Minimum 1800000 (30 min) |
 
 **`usage_limits` nested object**
 
@@ -704,9 +706,39 @@ Manages Portkey API keys (organization-scoped or workspace-scoped).
 | `next_rotation_at` | String | No/Computed | ISO8601 datetime for the next scheduled rotation; computed by the API |
 | `key_transition_period_ms` | Number | No | Overlap window in ms after rotation during which both old and new keys are valid (minimum 1800000 — 30 min) |
 
-**Read-only attributes**: `id`, `key` (sensitive), `organisation_id`, `status`, `created_at`, `updated_at`, `last_reset_at`
+**Read-only attributes**: `id`, `key` (sensitive), `organisation_id`, `status`, `created_at`, `updated_at`, `last_reset_at`, `key_transition_expires_at`
 
 **Import**: `terraform import portkey_api_key.example api-key-id`
+
+#### On-Demand Rotation
+
+Use `rotate_trigger` to force an immediate key rotation on the next apply. Bumping the trigger to any new value (a date, an integer, a hash) calls `POST /api-keys/{id}/rotate`: a new key value is issued, `key` is replaced in state, and `key_transition_expires_at` is populated with the cut-off for the previous key.
+
+```hcl
+resource "portkey_api_key" "rotatable" {
+  name         = "Rotatable Service Key"
+  type         = "workspace"
+  sub_type     = "service"
+  workspace_id = portkey_workspace.dev.id
+  scopes       = ["completions.write"]
+
+  rotate_trigger              = "v1"     # bump this value to rotate
+  rotate_transition_period_ms = 3600000  # optional, defaults to API setting
+}
+```
+
+Behavior notes:
+* Rotation fires only when `rotate_trigger`'s value **changes** (including the first time you add it to an existing key).
+* Setting `rotate_trigger` on a brand-new resource does **not** rotate — the key is freshly issued already.
+* Removing `rotate_trigger` does **not** rotate.
+* `rotate_transition_period_ms` is only consulted when the trigger fires; minimum is 1,800,000 (30 minutes) per the API spec.
+* **Do not** wire `rotate_trigger = timestamp()`; it would rotate on every apply and break consumers using the previous value.
+* Required Admin API Key scope on the calling key:
+  * `organisation_service_api_keys.update` for `type="organisation"`, `sub_type="service"`
+  * `workspace_service_api_keys.update`    for `type="workspace"`,    `sub_type="service"`
+  * `workspace_user_api_keys.update`       for `type="workspace"`,    `sub_type="user"`
+
+  A 403 (`AB03`) from the rotate endpoint almost always means this scope is missing.
 
 ---
 
@@ -1071,6 +1103,28 @@ You can also set a specific `next_rotation_at` datetime to control exactly when 
 ```
 
 `next_rotation_at` is computed by the API after the first rotation, so Terraform will read it back automatically on subsequent plans.
+
+#### Forcing an Immediate Rotation
+
+When you need to rotate a key right now (incident response, employee offboarding, ad-hoc compliance check) without waiting for the scheduled rotation, bump `rotate_trigger`:
+
+```hcl
+resource "portkey_api_key" "rotatable" {
+  name         = "Rotatable Service Key"
+  type         = "workspace"
+  sub_type     = "service"
+  workspace_id = portkey_workspace.production.id
+  scopes       = ["completions.write"]
+
+  # Change this string (date, integer, hash) to rotate on the next `terraform apply`.
+  rotate_trigger = "rotate-2026-04-01"
+
+  # Optional: keep the previous key valid for an extra hour (minimum 1800000 = 30 min).
+  rotate_transition_period_ms = 3600000
+}
+```
+
+After the apply, `key` holds the newly-issued value and `key_transition_expires_at` is populated with the API-returned cut-off for the previous key. See [On-Demand Rotation](#on-demand-rotation) for the full behavior contract and required Admin API Key scopes.
 
 #### Combining Expiry with a Rotation Policy
 

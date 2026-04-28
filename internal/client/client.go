@@ -885,6 +885,53 @@ func (c *Client) DeleteAPIKey(ctx context.Context, id string) error {
 	return err
 }
 
+// RotateAPIKeyRequest represents the request body for the on-demand rotate
+// endpoint (POST /api-keys/{id}/rotate). All fields are optional — when the
+// request body is empty, the API uses its default transition period.
+type RotateAPIKeyRequest struct {
+	// KeyTransitionPeriodMs controls how long the previous key value remains
+	// valid after rotation. Per the Portkey API spec the minimum is 1,800,000
+	// milliseconds (30 minutes); the API rejects smaller values.
+	KeyTransitionPeriodMs *int `json:"key_transition_period_ms,omitempty"`
+}
+
+// RotateAPIKeyResponse represents the API response from rotating an API key.
+// The response always includes the new key value; KeyTransitionExpiresAt is
+// populated when the API has scheduled the cut-off for the previous key.
+type RotateAPIKeyResponse struct {
+	ID                     string `json:"id"`
+	Key                    string `json:"key"`
+	KeyTransitionExpiresAt string `json:"key_transition_expires_at,omitempty"`
+}
+
+// RotateAPIKey performs an on-demand rotation of the API key identified by id.
+// On success the returned RotateAPIKeyResponse contains the new key value;
+// the previous key remains valid for the configured transition period.
+//
+// When req is nil the request body is omitted, letting the API apply its
+// default transition period. When KeyTransitionPeriodMs is non-nil it is sent
+// in the body and must be at least 1,800,000 (30 minutes) per the API spec.
+func (c *Client) RotateAPIKey(ctx context.Context, id string, req *RotateAPIKeyRequest) (*RotateAPIKeyResponse, error) {
+	path := fmt.Sprintf("/api-keys/%s/rotate", id)
+
+	var body interface{}
+	if req != nil {
+		body = req
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return nil, err
+	}
+
+	var response RotateAPIKeyResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
+}
+
 // Provider represents a Portkey provider (virtual key)
 type Provider struct {
 	ID            string                 `json:"id"`

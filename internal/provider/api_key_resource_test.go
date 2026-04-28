@@ -1166,6 +1166,12 @@ resource "portkey_api_key" "test" {
 //   - Subsequent applies without trigger changes are a no-op (no spurious
 //     plans, no re-rotation).
 //   - Removing rotate_trigger does NOT trigger another rotation.
+//
+// NOTE: This test requires the Admin API Key (PORTKEY_API_KEY) to have the
+// `organisation_service_api_keys.update` scope (the test creates an
+// organisation/service key). When the scope is missing, the rotation step
+// fails with HTTP 403 (errorCode AB03). Grant the scope via
+// Settings → API Keys in the Portkey dashboard, then re-run.
 func TestAccAPIKeyResource_rotateTrigger(t *testing.T) {
 	name := acctest.RandomWithPrefix("tf-acc-ak-rotate")
 
@@ -1251,6 +1257,12 @@ func TestAccAPIKeyResource_rotateTriggerBelowMinTransition(t *testing.T) {
 // can both rename the key (regular field change) and rotate it: the regular
 // fields are persisted via UpdateAPIKey first, then /rotate runs to refresh
 // the key value.
+//
+// NOTE: This test requires the Admin API Key (PORTKEY_API_KEY) to have the
+// `organisation_service_api_keys.update` scope (the test creates an
+// organisation/service key). When the scope is missing, the rotation step
+// fails with HTTP 403 (errorCode AB03). Grant the scope via
+// Settings → API Keys in the Portkey dashboard, then re-run.
 func TestAccAPIKeyResource_rotateTriggerWithRename(t *testing.T) {
 	name := acctest.RandomWithPrefix("tf-acc-ak-rotren")
 	nameUpdated := name + "-upd"

@@ -22,7 +22,7 @@
 | `portkey_workspace_member` | ✅ | ⚠️ | ✅ | ✅ | ✅ | getMember API has issues | Skipped |
 | `portkey_user_invite` | ✅ | ✅ | ❌ | ✅ | ✅ | Update API doesn't exist | ✅ Passing |
 | `portkey_integration` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
-| `portkey_api_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ 27 tests |
+| `portkey_api_key` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD + on-demand `/rotate` (via `rotate_trigger`) | ✅ 30 tests |
 | `portkey_provider` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_config` | ✅ | ✅ | ✅ | ✅ | ✅ | Full CRUD working | ✅ Passing |
 | `portkey_prompt` | ✅ | ✅ | ⚠️ | ✅ | ✅ | Template updates need versions | ✅ Passing |
@@ -143,6 +143,7 @@ POST   /api-keys/{type}/{sub-type} → Create
 GET    /api-keys                   → List (optional ?workspace_id=xxx filter)
 GET    /api-keys/{id}              → Read
 PUT    /api-keys/{id}              → Update
+POST   /api-keys/{id}/rotate       → On-demand rotation (via `rotate_trigger`); requires the matching *_api_keys.update Admin scope
 DELETE /api-keys/{id}              → Delete
 ```
 

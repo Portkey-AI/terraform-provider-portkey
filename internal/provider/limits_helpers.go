@@ -112,10 +112,10 @@ func buildWorkspaceLimitsFromPlan(ctx context.Context, plan *workspaceResourceMo
 
 // workspaceUsageLimitsToTerraformList converts client workspace usage limits to a Terraform list.
 //
-// `periodic_reset` is the only Optional attribute in the nested object — and
-// the Portkey API returns "" (empty string) when the user did not set it or
-// explicitly nulled it. Storing that as types.StringValue("") would produce a
-// "Provider produced inconsistent result after apply" error whenever an HCL
+// `periodic_reset` is the only Optional string attribute in the nested object,
+// and the Portkey API returns "" (empty string) when the user did not set it
+// or explicitly nulled it. Storing that as types.StringValue("") would produce
+// a "Provider produced inconsistent result after apply" error whenever an HCL
 // plan said `periodic_reset = null`, because the plan value (null) and the
 // post-apply state value ("") are not equivalent. The fix maps the API's
 // empty string back to types.StringNull() so plan and state agree.

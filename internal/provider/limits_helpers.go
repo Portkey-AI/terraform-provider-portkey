@@ -162,8 +162,9 @@ func workspaceUsageLimitsToTerraformList(limits []client.IntegrationWorkspaceUsa
 }
 
 // workspaceRateLimitsToTerraformList converts client workspace rate limits to a Terraform list.
-// All three nested attributes (type, unit, value) are schema-Required, so the
-// API always echoes back a non-empty value and we wrap each one unconditionally.
+// `type` and `unit` are wrapped directly from the API response. `value` is
+// still handled as nullable here to match the client model and avoid changing
+// behavior if the API omits it.
 func workspaceRateLimitsToTerraformList(limits []client.IntegrationWorkspaceRateLimits) (types.List, diag.Diagnostics) {
 	var diags diag.Diagnostics
 

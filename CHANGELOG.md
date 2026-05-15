@@ -5,73 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...HEAD)
 
 ### Added
+
+- **Workspace Icon Support** - `portkey_workspace` now supports an `icon` attribute to manage workspace emoji icons:
+  - Eliminates permanent plan drift caused by the Portkey API prepending icons to workspace names
+  - When `icon` is set, the provider strips the icon prefix from API responses so `name` always reflects the clean user-configured value
+  - Fully backwards compatible — existing configs without `icon` see no changes
+  - Set `icon = ""` to explicitly clear an icon
+  - The `portkey_workspaces` data source now includes the `icon` field
 - **HTTP client retry on transient failures** - API requests that fail due
-  to network errors or transient 5xx responses are now retried automatically
-  with exponential backoff (500ms base, 5s cap, up to 4 retries by default).
-  4xx responses (except 429) are returned immediately. At scale, a single
-  transient 503 from the control plane would previously fail an entire
-  `terraform plan` or `apply`; this change makes the provider resilient to
-  ordinary upstream flakiness. Uses `hashicorp/go-retryablehttp`.
-- **`max_retries` provider attribute** - Tunes the retry count to match
-  deployment needs (e.g., reduce in fast-fail CI environments, increase
-  for slow networks). Falls back to the `PORTKEY_MAX_RETRIES` environment
-  variable; defaults to 4. Set to 0 to disable retries entirely. Follows
-  the same pattern as `hashicorp/terraform-provider-vault` (`max_retries`
-  + `VAULT_MAX_RETRIES`).
+to network errors or transient 5xx responses are now retried automatically
+with exponential backoff (500ms base, 5s cap, up to 4 retries by default).
+4xx responses (except 429) are returned immediately. At scale, a single
+transient 503 from the control plane would previously fail an entire
+`terraform plan` or `apply`; this change makes the provider resilient to
+ordinary upstream flakiness. Uses `hashicorp/go-retryablehttp`.
+- `**max_retries` provider attribute** - Tunes the retry count to match
+deployment needs (e.g., reduce in fast-fail CI environments, increase
+for slow networks). Falls back to the `PORTKEY_MAX_RETRIES` environment
+variable; defaults to 4. Set to 0 to disable retries entirely. Follows
+the same pattern as `hashicorp/terraform-provider-vault` (`max_retries`
+  - `VAULT_MAX_RETRIES`).
 - **Retry visibility under `TF_LOG=DEBUG`** - Retry attempts are now
-  logged via `terraform-plugin-log` at Debug level using the per-request
-  context, so they appear with the correct Terraform operation tagging.
-  By default (no `TF_LOG`), retries remain silent.
-- **`client.NewClientWithConfig`** - New constructor accepting a
-  `client.ClientConfig` struct for callers that need to set retry
-  behavior. The existing `client.NewClient(baseURL, apiKey)` is retained
-  as a thin wrapper for backwards compatibility.
+logged via `terraform-plugin-log` at Debug level using the per-request
+context, so they appear with the correct Terraform operation tagging.
+By default (no `TF_LOG`), retries remain silent.
+- `**client.NewClientWithConfig**` - New constructor accepting a
+`client.ClientConfig` struct for callers that need to set retry
+behavior. The existing `client.NewClient(baseURL, apiKey)` is retained
+as a thin wrapper for backwards compatibility.
 
-## [0.2.17] - 2026-04-10
+## [0.2.17](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17) - 2026-04-10
 
 ### Added
+
 - **API Key Config Binding** - `portkey_api_key` now supports binding a default Portkey config:
   - `config_id` - ID of the Portkey config to bind as the default for all requests made using this API key
   - `allow_config_override` - Controls whether callers can override the bound config at request time (defaults to `false`)
   - Plan-time validation prevents setting `allow_config_override = true` without a `config_id`
   - Once set, clearing these fields in Terraform preserves the existing binding (use API directly to unset)
 
-## [0.2.16] - 2026-03-13
+## [0.2.16](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16) - 2026-03-13
 
 ### Fixed
+
 - **Integration Workspace Access UUID/Slug Resolution** - Fixed `portkey_integration_workspace_access` read-after-create failures when `workspace_id` is a UUID but integration workspace APIs return workspace slugs. `GetIntegrationWorkspace()` now resolves UUID input to slug before lookup.
 
-## [0.2.15] - 2026-03-06
+## [0.2.15](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15) - 2026-03-06
 
 ### Added
+
 - **Integration Model Access Control** - `portkey_integration` now supports `allow_all_models` attribute:
   - Defaults to `true` (all models available, matching API behavior)
   - Set to `false` to restrict access to only models explicitly enabled via `portkey_integration_model_access` resources
 
-## [0.2.14] - 2026-02-27
+## [0.2.14](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...v0.2.14) - 2026-02-27
 
 ### Added
+
 - **Workspace-Scoped Integrations** - `portkey_integration` now supports workspace-level scoping:
   - `workspace_id` - Optional attribute to scope an integration to a specific workspace
   - `type` - Computed attribute showing "organisation" or "workspace" level
   - Organisation-level integrations are accessible across all workspaces
   - Workspace-level integrations are only accessible within the specified workspace
 
-## [0.2.13] - 2026-02-22
+## [0.2.13](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...v0.2.13) - 2026-02-22
 
 ### Fixed
+
 - **Prompt & Prompt Partial Drift Detection** - Fixed issues where external changes made in the Portkey console were invisible to Terraform:
   - Now detects when someone edits a prompt or partial outside Terraform (new versions or rollbacks)
   - Terraform will show the drift and overwrite back to config values on next apply
 - **Version Description Perpetual Drift** - Fixed infinite plan loop when `version_description` was set via console but not in Terraform config
 - **MakeDefault Version Lookup** - Fixed incorrect version targeting when versions are created outside Terraform (e.g., console edits creating gaps in version sequence). Now uses version list API to find the correct version number instead of assuming `+1` increment
 
-## [0.2.12] - 2026-02-20
+## [0.2.12](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.11...v0.2.12) - 2026-02-20
 
 ### Added
+
 - **Prompt Partials** - New resource and data sources for reusable template fragments:
   - `portkey_prompt_partial` - Create and manage prompt partials with versioning support
   - `portkey_prompt_partial` (data source) - Look up a single partial by slug with optional version
@@ -83,6 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All related data sources now return limit configurations
 
 ### Fixed
+
 - **Prompt Resource Eventual Consistency** - Fixed issues where Portkey API returns stale data after mutations:
   - Template, version, and version_id are now preserved from state during Read
   - Added `virtual_key` to all version-creating prompt updates (API requirement)
@@ -90,11 +104,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Version Description Warning** - Added diagnostic warning when `version_description` changes without content (no-op against API)
 
 ### Changed
+
 - Refactored shared limit conversion helpers into `limits_helpers.go` to eliminate duplication
 
-## [0.2.11] - 2026-02-04
+## [0.2.11](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.10...v0.2.11) - 2026-02-04
 
 ### Added
+
 - **Prompt Collections** - New resource and data sources for organizing prompts within workspaces:
   - `portkey_prompt_collection` - Create and manage prompt collections with hierarchical nesting support
   - `portkey_prompt_collection` (data source) - Look up a single collection by ID
@@ -102,12 +118,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support for nested collections via `parent_collection_id`
 
 ### Documentation
+
 - Added documentation and examples for prompt collection resource and data sources
 - Updated RESOURCE_MATRIX.md with prompt collection support
 
-## [0.2.10] - 2026-01-28
+## [0.2.10](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.9...v0.2.10) - 2026-01-28
 
 ### Fixed
+
 - **Azure OpenAI Integration Configuration** - Fixed incorrect field names in documentation that caused 400 "Invalid request" errors:
   - Changed `resource_name` to `azure_resource_name`
   - Changed flat `deployment_id`/`api_version` to nested `azure_deployment_config` array structure
@@ -115,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added required `azure_model_slug` field in deployment config
 
 ### Added
+
 - **Azure OpenAI Authentication Modes** - Full documentation and examples for all 3 authentication methods:
   - `default` - API key authentication
   - `entra` - Microsoft Entra ID (Azure AD) authentication
@@ -126,9 +145,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Managed Identity authentication
   - Configuration updates
 
-## [0.2.9] - 2026-01-27
+## [0.2.9](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.8...v0.2.9) - 2026-01-27
 
 ### Added
+
 - **Integration Model Access** - New resource and data source for managing model access per integration:
   - `portkey_integration_model_access` - Enable/disable specific models for an integration with optional custom pricing
   - `portkey_integration_models` - Data source to list all models available for an integration
@@ -137,11 +157,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Built-in models are disabled on delete; custom models are fully removed
 
 ### Documentation
+
 - Added documentation for integration model access resource and data source
 
-## [0.2.8] - 2026-01-26
+## [0.2.8](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.7...v0.2.8) - 2026-01-26
 
 ### Added
+
 - **Write-Only API Key Support** - `portkey_integration` now supports write-only API keys using Terraform 1.11+'s `WriteOnly` attribute:
   - `key_wo` - API key that is never stored in Terraform state or shown in plan output
   - `key_version` - Trigger to control when the key is sent to the API (increment to update)
@@ -155,12 +177,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enables full IaC workflows without manual UI enablement
 
 ### Documentation
+
 - Updated `portkey_integration` documentation with write-only key examples
 - Added documentation for integration workspace access resource and data source
 
-## [0.2.7] - 2026-01-08
+## [0.2.7](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.6...v0.2.7) - 2026-01-08
 
 ### Added
+
 - **API Key Metadata & Alert Emails** - `portkey_api_key` now supports:
   - `metadata` - Custom metadata (map of strings) attached to the API key for tracking, observability, and service identification. Example: `{"_user": "service-name", "service_uuid": "abc123"}`
   - `alert_emails` - List of email addresses to receive alerts related to the API key's usage
@@ -168,41 +192,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `metadata` - Custom metadata (map of strings) attached to the workspace for tracking teams, environments, and services
 
 ### Documentation
+
 - Updated documentation for `portkey_api_key` resource and data sources
 - Updated documentation for `portkey_workspace` resource and data sources
 
-## [0.2.6] - 2026-01-05
+## [0.2.6](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.5...v0.2.6) - 2026-01-05
 
 ### Documentation
+
 - Added Terraform Registry documentation for all resources and data sources
 - Documentation auto-generated using `tfplugindocs`
 
-## [0.2.5] - 2026-01-05
+## [0.2.5](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.4...v0.2.5) - 2026-01-05
 
 ### Added
+
 - **AWS Bedrock IAM Role Support** - `portkey_integration` now supports a `configurations` field for provider-specific settings:
   - AWS Bedrock with IAM Role authentication (`aws_role_arn`, `aws_region`, `aws_external_id`)
   - AWS Bedrock with Access Keys (`aws_access_key_id`, `aws_region`)
   - Azure OpenAI configurations (`resource_name`, `deployment_id`, `api_version`)
 
 ### Documentation
+
 - Added comprehensive examples for AWS Bedrock and Azure OpenAI integrations
 - Updated `portkey_integration` documentation with `configurations` field
 
-## [0.2.4] - 2026-01-05
+## [0.2.4](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.3...v0.2.4) - 2026-01-05
 
 ### Fixed
+
 - Fixed lint errors (gofmt, unused function, errcheck)
 - **Critical: Fixed "Provider produced inconsistent result after apply" errors** - Resolved issues where Terraform would report inconsistent results due to state handling
 
-## [0.2.3] - 2026-01-04
+## [0.2.3](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.2...v0.2.3) - 2026-01-04
 
 ### Documentation
+
 - Added known issue for workspace deletion with emoji names in README
 
-## [0.2.2] - 2026-01-04
+## [0.2.2](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.1...v0.2.2) - 2026-01-04
 
 ### Fixed
+
 - **Critical: Resources no longer unnecessarily recreated on every apply** - Fixed a bug where `RequiresReplace` attributes (like `workspace_id`) were being overwritten during `Read()` operations, causing Terraform to detect false changes and trigger destroy/create cycles. Affected resources:
   - `portkey_config`
   - `portkey_guardrail`
@@ -216,22 +247,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed CI linting issues and code formatting
 - Reverted golangci-lint config to v1 format for CI compatibility
 
-## [0.2.1] - 2026-01-03
+## [0.2.1](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.0...v0.2.1) - 2026-01-03
 
 ### Documentation
+
 - Added Prerequisites section to README
 - Added Troubleshooting section to README
 - Added Known Issues section to README
 - Fixed README examples to use `jsonencode()` for JSON fields
 
 ### Fixed
+
 - Fixed provider unit tests with correct resource counts
 - Added Terraform setup to CI and formatted example files
 - Fixed gofmt formatting and removed unused functions
 
-## [0.2.0] - 2026-01-02
+## [0.2.0](https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.1.0...v0.2.0) - 2026-01-02
 
 ### Added
+
 - **AI Gateway Resources:**
   - `portkey_integration` - Manage AI provider integrations (OpenAI, Anthropic, Azure, etc.)
   - `portkey_provider` - Manage providers/virtual keys for workspace-scoped AI access
@@ -254,12 +288,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `portkey_api_key`, `portkey_api_keys`
 
 ### Documentation
+
 - Added guide for adding new APIs to the Terraform provider
 - Added Registry and CI badges to README
 
-## [0.1.0] - 2026-01-01
+## [0.1.0](https://github.com/Portkey-AI/terraform-provider-portkey/releases/tag/v0.1.0) - 2026-01-01
 
 ### Added
+
 - Initial release of the Portkey Terraform Provider
 - **Organization Resources:**
   - `portkey_workspace` - Manage Portkey workspaces
@@ -277,34 +313,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-environment setup example
 
 ### Supported Operations
+
 - Full CRUD operations for workspaces
 - User invitation with granular scope management
 - Workspace member role assignment
 - Organization and workspace role management
 
 ### Known Limitations
+
 - User invitations cannot be updated (must delete and recreate)
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
-
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...HEAD
-[0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
-[0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16
-[0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15
-[0.2.14]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.13...v0.2.14
-[0.2.13]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.12...v0.2.13
-[0.2.12]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.11...v0.2.12
-[0.2.11]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.10...v0.2.11
-[0.2.10]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.9...v0.2.10
-[0.2.9]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.8...v0.2.9
-[0.2.8]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.7...v0.2.8
-[0.2.7]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.6...v0.2.7
-[0.2.6]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.5...v0.2.6
-[0.2.5]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.4...v0.2.5
-[0.2.4]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.3...v0.2.4
-[0.2.3]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Portkey-AI/terraform-provider-portkey/releases/tag/v0.1.0
 

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.18] - 2026-05-15
+## [0.2.25] - 2026-05-22
 
 ### Added
 - **Workspace Icon Support** - `portkey_workspace` now supports an `icon` attribute to manage workspace emoji icons:
@@ -295,8 +295,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.18...HEAD
-[0.2.18]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.17...v0.2.18
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.25...HEAD
+[0.2.25]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.24...v0.2.25
 [0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.14...v0.2.15

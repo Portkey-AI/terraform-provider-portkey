@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.26] - 2026-05-22
+
+### Fixed
+- **Workspace Usage/Rate Limits Update Consistency** - Fixed "Provider produced inconsistent result after apply" errors when updating `usage_limits` or `rate_limits` on `portkey_workspace`. The Portkey API has eventual consistency and PUT responses may return stale data. The Update handler now trusts plan values (mirroring Create behavior) and reconciles on the next Read.
+
 ## [0.2.25] - 2026-05-22
 
 ### Added
@@ -295,7 +300,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.25...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.26...HEAD
+[0.2.26]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.25...v0.2.26
 [0.2.25]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.24...v0.2.25
 [0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16

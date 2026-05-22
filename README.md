@@ -34,6 +34,9 @@ This provider enables you to manage:
 ### Secret Management
 - **Secret References**: Register external secret managers (AWS Secrets Manager, Azure Key Vault, HashiCorp Vault) with plan-time validated, typed auth blocks
 
+### Identity / SCIM
+- **SCIM Workspace Mappings**: Bind SCIM-provisioned groups (e.g. Okta) to workspaces at a specific role (admin, member, manager). Useful for declaratively giving an Okta group access to a workspace at the right level without clicking through the Portkey UI.
+
 ## Requirements
 
 - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
@@ -852,6 +855,55 @@ resource "portkey_secret_reference" "azure_entra" {
 
 See `examples/secret_reference/` for a complete, runnable example covering AWS, Azure, and Vault variants plus data source usage.
 
+### Identity / SCIM Resources
+
+#### `portkey_scim_workspace_mapping`
+
+Binds a SCIM-provisioned group (typically from Okta or Azure AD) to a Portkey workspace at a specific role. Useful for declaratively giving an IdP group access to a workspace without clicking through *Admin Settings → Authentication Settings → SCIM Provisioning → SCIM Mappings List*.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `workspace_id` | String | Yes | ID or slug of the workspace (e.g. from `portkey_workspace.foo.id`) |
+| `role` | String | Yes | Role assigned to group members in the workspace. One of: `admin`, `member`, `manager` |
+| `scim_group_id` | String | One of these two | ID of an existing SCIM group |
+| `scim_group_name` | String | One of these two | Display name of the SCIM group. Used to pre-create the mapping before the IdP pushes the group. Must not match Portkey's auto-provisioning pattern (e.g. `ws-<name>-role-admin`) |
+
+**Computed**
+
+| Attribute | Description |
+|-----------|-------------|
+| `id` | Unique identifier of the mapping |
+| `scim_group` | Display name of the mapped SCIM group as returned by the Portkey API |
+
+**Example**
+
+```hcl
+resource "portkey_workspace" "example" {
+  name        = "Example Workspace"
+  description = "Example workspace"
+}
+
+resource "portkey_scim_workspace_mapping" "example_admins" {
+  workspace_id    = portkey_workspace.example.id
+  scim_group_name = "app-portkey-stage-ws-example-admins"
+  role            = "admin"
+}
+
+resource "portkey_scim_workspace_mapping" "example_members" {
+  workspace_id    = portkey_workspace.example.id
+  scim_group_name = "app-portkey-stage-ws-example-members"
+  role            = "member"
+}
+```
+
+**Import**: `terraform import portkey_scim_workspace_mapping.example workspace-id/mapping-id`
+
+**Notes**
+
+- The Portkey API has no PATCH for SCIM workspace mappings. Changing any field (role, workspace, group reference) triggers resource replacement.
+- Exactly one of `scim_group_id` or `scim_group_name` must be set; the resource validates this with `ExactlyOneOf` at plan time.
+- SCIM endpoints are versioned independently from the rest of the Admin API and live under `/v2/scim/*`. The provider routes SCIM calls to `/v2` transparently — `base_url` stays at `.../v1` for both SaaS and self-hosted setups, no extra configuration needed.
+
 ## Data Sources
 
 ### Organization Data Sources
@@ -903,6 +955,12 @@ See `examples/secret_reference/` for a complete, runnable example covering AWS, 
 | `portkey_secret_references` | List secret references (paginated, filterable by `search`, `manager_type`) | - |
 
 > **Note:** Neither data source exposes the `auth_config` block. The API returns credential fields masked, so surfacing them in a data source would only leak placeholder values and invite state drift.
+
+### Identity / SCIM Data Sources
+
+| Data Source | Description | Key Arguments |
+|-------------|-------------|---------------|
+| `portkey_scim_workspace_mappings` | List SCIM workspace mappings | `workspace_id`, `scim_group_id`, `role` (all optional filters) |
 
 ## Development
 

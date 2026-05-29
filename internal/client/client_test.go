@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -206,5 +208,64 @@ func TestDoRequest_RetriesOn429(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(count); got != 2 {
 		t.Fatalf("expected 2 attempts (1 rate-limited + 1 success), got %d", got)
+	}
+}
+
+func TestDoRequest_ReturnsAPIErrorOn4xx(t *testing.T) {
+	// Non-retryable 4xx responses should return a *APIError carrying the
+	// status code and raw body so callers can apply per-status handling
+	// (e.g. treating 403 on Read as missing-resource for state
+	// reconciliation). The error message must preserve the legacy string
+	// format so existing callers that match against
+	// "API request failed with status N" keep working.
+	srv, _ := newSequencedServer(t,
+		response{http.StatusNotFound, `{"errorCode":"AB08","message":"Resource not found"}`},
+	)
+
+	c := newTestClient(t, srv.URL)
+	_, err := c.doRequest(context.Background(), http.MethodGet, "/admin/workspaces/missing", nil)
+	if err == nil {
+		t.Fatal("expected error on 404, got nil")
+	}
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected StatusCode %d, got %d", http.StatusNotFound, apiErr.StatusCode)
+	}
+	if !strings.Contains(apiErr.Body, "AB08") {
+		t.Errorf("expected Body to contain raw API response, got %q", apiErr.Body)
+	}
+	if !strings.Contains(err.Error(), "API request failed with status 404") {
+		t.Errorf("expected legacy error string, got %q", err.Error())
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	// IsNotFound encapsulates Portkey's quirk: out-of-band-deleted
+	// resources return 403 (errorCode AB03) for some endpoints and 404
+	// for others. Both should be treated as missing-resource by Read
+	// implementations so Terraform can reconcile state.
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error is not not-found", nil, false},
+		{"plain error is not not-found", errors.New("network down"), false},
+		{"404 is not-found", &APIError{StatusCode: http.StatusNotFound, Body: ""}, true},
+		{"403 is not-found", &APIError{StatusCode: http.StatusForbidden, Body: `{"errorCode":"AB03"}`}, true},
+		{"500 is not not-found", &APIError{StatusCode: http.StatusInternalServerError, Body: ""}, false},
+		{"400 is not not-found", &APIError{StatusCode: http.StatusBadRequest, Body: `{"errorCode":"AB01"}`}, false},
+		{"wrapped 404 unwraps via errors.As", fmt.Errorf("read failed: %w", &APIError{StatusCode: http.StatusNotFound}), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsNotFound(tc.err); got != tc.want {
+				t.Errorf("IsNotFound(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -117,6 +118,37 @@ func NewClientWithConfig(cfg ClientConfig) (*Client, error) {
 	}, nil
 }
 
+// APIError represents a non-2xx response from the Portkey Admin API. Callers
+// can use errors.As to inspect the StatusCode and apply per-status handling
+// (e.g. treating 403/404 on a Read as missing-resource for state
+// reconciliation).
+//
+// Body is the raw response body so callers can extract Portkey's structured
+// errorCode (AB01, AB03, AB07, AB08, etc.) when they need finer-grained
+// behaviour.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Body)
+}
+
+// IsNotFound reports whether the error indicates a missing resource as
+// signalled by the Portkey API. Portkey returns 404 for some endpoints and
+// 403 (errorCode AB03) for others when a referenced resource has been
+// deleted out-of-band — both should be treated as missing-resource by
+// resource Read implementations so Terraform can reconcile state.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusNotFound ||
+		apiErr.StatusCode == http.StatusForbidden
+}
+
 // doRequest performs an HTTP request
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
 	var reqBody io.Reader
@@ -149,7 +181,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{
+			StatusCode: resp.StatusCode,
+			Body:       string(respBody),
+		}
 	}
 
 	return respBody, nil
@@ -269,16 +304,32 @@ func (c *Client) UpdateWorkspace(ctx context.Context, id string, req UpdateWorks
 	return workspace, nil
 }
 
-// DeleteWorkspaceRequest represents the request to delete a workspace
+// DeleteWorkspaceRequest represents the request to delete a workspace.
+//
+// ForceDelete instructs the Portkey Admin API to cascade-delete the
+// workspace's dependent resources (providers/virtual-keys, configs,
+// workspace API keys) before deleting the workspace itself. Without
+// it, the API returns 409 AB07 ("Unable to delete. Please ensure that
+// all Virtual Keys are deleted") if any dependent exists, forcing
+// callers to enumerate and DELETE every dependent manually before
+// they can apply a workspace destroy.
 type DeleteWorkspaceRequest struct {
 	Name        string `json:"name"`
 	ForceDelete bool   `json:"force_delete,omitempty"`
 }
 
-// DeleteWorkspace deletes a workspace
+// DeleteWorkspace deletes a workspace and cascades through its dependents.
+//
+// Sets force_delete=true so providers/virtual-keys, configs, and
+// workspace API keys are removed atomically with the workspace. Without
+// this, terraform destroy on a workspace with any dependent fails
+// partway through with 409 AB07, leaving the operator to manually
+// clean up every dependent before retrying -- defeating the purpose of
+// declarative state management.
 func (c *Client) DeleteWorkspace(ctx context.Context, id string, name string) error {
 	req := DeleteWorkspaceRequest{
-		Name: name,
+		Name:        name,
+		ForceDelete: true,
 	}
 	_, err := c.doRequest(ctx, http.MethodDelete, "/admin/workspaces/"+id, req)
 	return err

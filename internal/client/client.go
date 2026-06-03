@@ -162,16 +162,62 @@ type WorkspaceDefaults struct {
 
 // Workspace represents a Portkey workspace
 type Workspace struct {
-	ID          string                            `json:"id"`
-	Slug        string                            `json:"slug,omitempty"`
-	Name        string                            `json:"name"`
-	Icon        string                            `json:"icon,omitempty"`
-	Description string                            `json:"description,omitempty"`
-	Defaults    *WorkspaceDefaults                `json:"defaults,omitempty"`
-	RateLimits  []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
-	UsageLimits []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
-	CreatedAt   time.Time                         `json:"created_at"`
-	UpdatedAt   time.Time                         `json:"last_updated_at"`
+	ID               string                            `json:"id"`
+	Slug             string                            `json:"slug,omitempty"`
+	Name             string                            `json:"name"`
+	Icon             string                            `json:"icon,omitempty"`
+	Description      string                            `json:"description,omitempty"`
+	Defaults         *WorkspaceDefaults                `json:"defaults,omitempty"`
+	RateLimits       []IntegrationWorkspaceRateLimits  `json:"rate_limits,omitempty"`
+	UsageLimits      []IntegrationWorkspaceUsageLimits `json:"usage_limits,omitempty"`
+	SecuritySettings *WorkspaceSecuritySettings        `json:"security_settings,omitempty"`
+	CreatedAt        time.Time                         `json:"created_at"`
+	UpdatedAt        time.Time                         `json:"last_updated_at"`
+}
+
+// WorkspaceSecuritySettings represents the per-workspace role-permission bag
+// exposed by GET/PUT /admin/workspaces/{id} (where {id} is the workspace UUID
+// accepted by Client.GetWorkspace / Client.UpdateWorkspace). The Portkey API
+// requires the FULL object on PUT (sparse updates return 400 AB01); callers
+// must always merge user-supplied overrides on top of the current API values
+// before writing. All fields are camelCase on the wire to match the API
+// contract.
+type WorkspaceSecuritySettings struct {
+	MembersViewLogs                   bool `json:"membersViewLogs"`
+	ManagersUpdateWs                  bool `json:"managersUpdateWs"`
+	ManagersViewLogs                  bool `json:"managersViewLogs"`
+	MembersViewAllData                bool `json:"membersViewAllData"`
+	MembersViewApiKeys                bool `json:"membersViewApiKeys"`
+	MembersViewConfigs                bool `json:"membersViewConfigs"`
+	MembersViewPrompts                bool `json:"membersViewPrompts"`
+	ManagersViewAllData               bool `json:"managersViewAllData"`
+	ManagersViewApiKeys               bool `json:"managersViewApiKeys"`
+	ManagersViewConfigs               bool `json:"managersViewConfigs"`
+	ManagersViewPrompts               bool `json:"managersViewPrompts"`
+	MembersWriteApiKeys               bool `json:"membersWriteApiKeys"`
+	MembersWriteConfigs               bool `json:"membersWriteConfigs"`
+	MembersWritePrompts               bool `json:"membersWritePrompts"`
+	ManagersWriteApiKeys              bool `json:"managersWriteApiKeys"`
+	ManagersWriteConfigs              bool `json:"managersWriteConfigs"`
+	ManagersWritePrompts              bool `json:"managersWritePrompts"`
+	ManagersWriteWsUsers              bool `json:"managersWriteWsUsers"`
+	MembersViewAnalytics              bool `json:"membersViewAnalytics"`
+	ManagersViewAnalytics             bool `json:"managersViewAnalytics"`
+	MembersViewGuardrails             bool `json:"membersViewGuardrails"`
+	ManagersViewGuardrails            bool `json:"managersViewGuardrails"`
+	MembersViewLogMetadata            bool `json:"membersViewLogMetadata"`
+	MembersViewVirtualKeys            bool `json:"membersViewVirtualKeys"`
+	MembersWriteGuardrails            bool `json:"membersWriteGuardrails"`
+	ManagersViewLogMetadata           bool `json:"managersViewLogMetadata"`
+	ManagersViewVirtualKeys           bool `json:"managersViewVirtualKeys"`
+	ManagersWriteGuardrails           bool `json:"managersWriteGuardrails"`
+	ManagersWriteMcpServers           bool `json:"managersWriteMcpServers"`
+	MembersWriteVirtualKeys           bool `json:"membersWriteVirtualKeys"`
+	ManagersWriteVirtualKeys          bool `json:"managersWriteVirtualKeys"`
+	OrganisationAdminsViewLogs        bool `json:"organisationAdminsViewLogs"`
+	ManagersWriteWsIntegrations       bool `json:"managersWriteWsIntegrations"`
+	ManagersWriteWsMcpIntegrations    bool `json:"managersWriteWsMcpIntegrations"`
+	OrganisationAdminsViewLogMetadata bool `json:"organisationAdminsViewLogMetadata"`
 }
 
 // CreateWorkspaceRequest represents the request to create a workspace
@@ -198,12 +244,13 @@ type CreateWorkspaceRequest struct {
 // We cannot use *string with omitempty because Go's json encoder treats
 // a pointer to "" as empty, omitting the field — which prevents clearing.
 type UpdateWorkspaceRequest struct {
-	Name        string             `json:"name,omitempty"`
-	Icon        json.RawMessage    `json:"icon,omitempty"`
-	Description string             `json:"description,omitempty"`
-	Defaults    *WorkspaceDefaults `json:"defaults,omitempty"`
-	RateLimits  json.RawMessage    `json:"rate_limits,omitempty"`
-	UsageLimits json.RawMessage    `json:"usage_limits,omitempty"`
+	Name             string                     `json:"name,omitempty"`
+	Icon             json.RawMessage            `json:"icon,omitempty"`
+	Description      string                     `json:"description,omitempty"`
+	Defaults         *WorkspaceDefaults         `json:"defaults,omitempty"`
+	RateLimits       json.RawMessage            `json:"rate_limits,omitempty"`
+	UsageLimits      json.RawMessage            `json:"usage_limits,omitempty"`
+	SecuritySettings *WorkspaceSecuritySettings `json:"security_settings,omitempty"`
 }
 
 // CreateWorkspace creates a new workspace

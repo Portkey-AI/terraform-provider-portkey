@@ -315,6 +315,51 @@ Manages workspace membership for users.
 
 **Import**: `terraform import portkey_workspace_member.example workspace-id/member-id`
 
+#### `portkey_workspace_security_settings`
+
+Manages the per-workspace role-permission flags (`security_settings`) exposed
+by the Portkey Admin API. The 35 boolean flags (`members_view_all_data`,
+`managers_write_ws_users`, `organisation_admins_view_logs`, …) control which
+actions members, managers, and organisation admins can perform inside a given
+workspace.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `workspace_id` | String | Yes | Workspace whose `security_settings` are being managed (forces replace) |
+| `members_view_all_data` | Boolean | No | Whether members can view all data in the workspace |
+| `members_view_logs` | Boolean | No | Whether members can view request logs |
+| `managers_update_ws` | Boolean | No | Whether managers can update workspace settings |
+| `managers_write_ws_users` | Boolean | No | Whether managers can add/remove workspace users |
+| `organisation_admins_view_logs` | Boolean | No | Whether org admins can view logs in this workspace |
+| _…30 more flags_ | Boolean | No | See `docs/resources/workspace_security_settings.md` for the full list |
+
+Every flag is `Optional + Computed`: omit a flag and the provider keeps its
+current API value (via `UseStateForUnknown`). The Portkey API requires the
+full 35-field object on every PUT, so the provider reads the current
+settings and overlays user-supplied values before writing — partial configs
+are safe and do NOT silently reset other flags.
+
+```hcl
+resource "portkey_workspace_security_settings" "production" {
+  workspace_id = portkey_workspace.production.id
+
+  # Lock down "view all data" for non-admins.
+  members_view_all_data  = false
+  managers_view_all_data = false
+
+  # Let managers fully self-serve user management.
+  managers_write_ws_users = true
+}
+```
+
+**Destroy semantics**: Portkey has no endpoint to reset `security_settings`
+to a default, so `terraform destroy` removes the resource from state ONLY and
+emits a warning diagnostic. The actual flags on the workspace remain
+unchanged; re-import the resource if you want Terraform to manage them
+again.
+
+**Import**: `terraform import portkey_workspace_security_settings.example workspace-id`
+
 #### `portkey_user_invite`
 
 Sends invitations to users.

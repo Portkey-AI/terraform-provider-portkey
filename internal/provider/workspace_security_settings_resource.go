@@ -369,9 +369,10 @@ func (r *workspaceSecuritySettingsResource) Read(ctx context.Context, req resour
 	}
 
 	if ws.SecuritySettings == nil {
-		// API did not return security_settings for this workspace; treat as
-		// drift and clear state so Terraform re-creates / re-applies.
-		resp.State.RemoveResource(ctx)
+		resp.Diagnostics.AddError(
+			"Error Reading Portkey Workspace Security Settings",
+			"Workspace "+workspaceID+" response did not include security_settings; verify the Admin API key has permission to read security_settings (and that the workspace is in a healthy backend state).",
+		)
 		return
 	}
 

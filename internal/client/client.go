@@ -176,10 +176,12 @@ type Workspace struct {
 }
 
 // WorkspaceSecuritySettings represents the per-workspace role-permission bag
-// exposed by GET/PUT /admin/workspaces/{slug}. The Portkey API requires the
-// FULL object on PUT (sparse updates return 400 AB01); callers must always
-// merge user-supplied overrides on top of the current API values before
-// writing. All fields are camelCase on the wire to match the API contract.
+// exposed by GET/PUT /admin/workspaces/{id} (where {id} is the workspace UUID
+// accepted by Client.GetWorkspace / Client.UpdateWorkspace). The Portkey API
+// requires the FULL object on PUT (sparse updates return 400 AB01); callers
+// must always merge user-supplied overrides on top of the current API values
+// before writing. All fields are camelCase on the wire to match the API
+// contract.
 type WorkspaceSecuritySettings struct {
 	MembersViewLogs                   bool `json:"membersViewLogs"`
 	ManagersUpdateWs                  bool `json:"managersUpdateWs"`

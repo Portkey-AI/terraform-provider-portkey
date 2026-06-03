@@ -27,7 +27,9 @@ func NewWorkspaceSecuritySettingsResource() resource.Resource {
 }
 
 // workspaceSecuritySettingsResource manages the per-workspace role-permission
-// bag exposed by `GET/PUT /admin/workspaces/{slug}` -> `security_settings`.
+// bag exposed by `GET/PUT /admin/workspaces/{id}` -> `security_settings`,
+// where `{id}` is the workspace UUID accepted by client.GetWorkspace /
+// client.UpdateWorkspace (NOT the workspace slug).
 //
 // The Portkey Admin API requires the FULL 35-field object on every PUT
 // (sparse updates return 400 AB01). The resource therefore reads the current
@@ -117,8 +119,11 @@ func (r *workspaceSecuritySettingsResource) Schema(_ context.Context, _ resource
 				},
 			},
 			"workspace_id": schema.StringAttribute{
-				Description: "ID (slug) of the workspace whose security settings are being managed.",
-				Required:    true,
+				Description: "UUID of the workspace whose security settings are being managed. " +
+					"Must be the workspace ID accepted by the Portkey Admin API at " +
+					"`/admin/workspaces/{id}` (typically the value of `portkey_workspace.<name>.id`), " +
+					"NOT the workspace slug.",
+				Required: true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -289,10 +294,25 @@ func (r *workspaceSecuritySettingsResource) applySecuritySettings(
 		return client.WorkspaceSecuritySettings{}, fmt.Errorf("fetching current workspace: %w", err)
 	}
 
-	var current client.WorkspaceSecuritySettings
-	if currentWs.SecuritySettings != nil {
-		current = *currentWs.SecuritySettings
+	// Fail fast if the API did not return security_settings. Falling back to
+	// the zero-value struct here would silently coerce every flag the user
+	// did NOT specify in their config to `false` — for a security-related
+	// resource that is a dangerous "secure by default" violation (it could
+	// strip view/write permissions org-wide). Bail and surface the API
+	// inconsistency to the operator instead.
+	if currentWs.SecuritySettings == nil {
+		return client.WorkspaceSecuritySettings{}, fmt.Errorf(
+			"workspace %q response did not include security_settings; refusing to "+
+				"PUT a merged object built from an all-false default (this would "+
+				"silently clobber every flag the config does not explicitly set). "+
+				"This usually indicates the calling Admin API Key lacks the scope "+
+				"required to read security_settings, or the workspace is in an "+
+				"unexpected backend state — verify with "+
+				"`curl $PORTKEY_BASE_URL/admin/workspaces/%s -H 'x-portkey-api-key: $PORTKEY_API_KEY'`",
+			workspaceID, workspaceID,
+		)
 	}
+	current := *currentWs.SecuritySettings
 
 	merged := mergedSecuritySettings(plan, current)
 

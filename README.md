@@ -325,7 +325,7 @@ workspace.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
-| `workspace_id` | String | Yes | Workspace whose `security_settings` are being managed (forces replace) |
+| `workspace_id` | String | Yes | Workspace UUID (the `id` accepted by `/admin/workspaces/{id}`, i.e. `portkey_workspace.<name>.id` — **not** the slug). Forces replace. |
 | `members_view_all_data` | Boolean | No | Whether members can view all data in the workspace |
 | `members_view_logs` | Boolean | No | Whether members can view request logs |
 | `managers_update_ws` | Boolean | No | Whether managers can update workspace settings |
@@ -358,7 +358,7 @@ emits a warning diagnostic. The actual flags on the workspace remain
 unchanged; re-import the resource if you want Terraform to manage them
 again.
 
-**Import**: `terraform import portkey_workspace_security_settings.example workspace-id`
+**Import**: `terraform import portkey_workspace_security_settings.example <workspace-uuid>` (the same ID used at `/admin/workspaces/{id}`)
 
 #### `portkey_user_invite`
 

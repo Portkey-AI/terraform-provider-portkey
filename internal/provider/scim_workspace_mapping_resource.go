@@ -260,8 +260,10 @@ func (r *scimWorkspaceMappingResource) Delete(ctx context.Context, req resource.
 }
 
 // ImportState imports an existing SCIM workspace mapping into Terraform state.
-// Import ID format: workspace_id/mapping_id (workspace_id is required because
-// Read filters the list endpoint by workspace).
+// Import ID format: workspace_id/mapping_id. The mapping_id is what Read uses
+// to find the mapping; workspace_id is supplied here because it's a Required
+// attribute and the API doesn't echo it back in a slug-stable form, so it
+// can't be derived from the mapping alone.
 func (r *scimWorkspaceMappingResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

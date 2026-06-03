@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
@@ -64,6 +66,9 @@ func (d *scimWorkspaceMappingsDataSource) Schema(_ context.Context, _ datasource
 			"role": schema.StringAttribute{
 				Description: "Filter mappings by role (admin, member, or manager).",
 				Optional:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("admin", "member", "manager"),
+				},
 			},
 			"mappings": schema.ListNestedAttribute{
 				Description: "List of SCIM workspace mappings matching the filters.",

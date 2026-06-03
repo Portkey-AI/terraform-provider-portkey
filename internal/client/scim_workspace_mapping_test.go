@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// TestScimWorkspacesURL verifies that SCIM endpoint URLs swap the configured
-// /v1 BaseURL suffix for /v2, which is a temporary workaround documented in
-// the client while Portkey fixes the /v1 routing for SCIM endpoints.
+// TestScimWorkspacesURL verifies that SCIM endpoint URLs are built by appending
+// /scim/workspaces to the configured BaseURL, which lives under /v1 alongside
+// the rest of the Admin API.
 func TestScimWorkspacesURL(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -24,25 +24,25 @@ func TestScimWorkspacesURL(t *testing.T) {
 			name:    "default v1 base url",
 			baseURL: "https://api.portkey.ai/v1",
 			suffix:  "",
-			want:    "https://api.portkey.ai/v2/scim/workspaces",
+			want:    "https://api.portkey.ai/v1/scim/workspaces",
 		},
 		{
 			name:    "default v1 base url with id suffix",
 			baseURL: "https://api.portkey.ai/v1",
 			suffix:  "/abc-123",
-			want:    "https://api.portkey.ai/v2/scim/workspaces/abc-123",
+			want:    "https://api.portkey.ai/v1/scim/workspaces/abc-123",
 		},
 		{
 			name:    "default v1 base url with query suffix",
 			baseURL: "https://api.portkey.ai/v1",
 			suffix:  "?workspace_id=ws-foo",
-			want:    "https://api.portkey.ai/v2/scim/workspaces?workspace_id=ws-foo",
+			want:    "https://api.portkey.ai/v1/scim/workspaces?workspace_id=ws-foo",
 		},
 		{
-			name:    "self-hosted base url that does not end in /v1",
-			baseURL: "https://portkey.internal.example.com/api",
+			name:    "self-hosted base url",
+			baseURL: "https://portkey.internal.example.com/api/v1",
 			suffix:  "",
-			want:    "https://portkey.internal.example.com/api/v2/scim/workspaces",
+			want:    "https://portkey.internal.example.com/api/v1/scim/workspaces",
 		},
 	}
 
@@ -58,8 +58,7 @@ func TestScimWorkspacesURL(t *testing.T) {
 }
 
 // TestCreateScimWorkspaceMapping_OK verifies that Create POSTs the right body
-// to /v2/scim/workspaces (BaseURL /v1 swapped for /v2) and parses the
-// response correctly.
+// to /v1/scim/workspaces and parses the response correctly.
 func TestCreateScimWorkspaceMapping_OK(t *testing.T) {
 	var capturedMethod, capturedPath string
 	var capturedBody map[string]any
@@ -93,8 +92,8 @@ func TestCreateScimWorkspaceMapping_OK(t *testing.T) {
 	if capturedMethod != http.MethodPost {
 		t.Errorf("method: got %q, want POST", capturedMethod)
 	}
-	if capturedPath != "/v2/scim/workspaces" {
-		t.Errorf("path: got %q, want /v2/scim/workspaces (the v1->v2 swap)", capturedPath)
+	if capturedPath != "/v1/scim/workspaces" {
+		t.Errorf("path: got %q, want /v1/scim/workspaces", capturedPath)
 	}
 	if capturedBody["workspace_id"] != "ws-example-abcd12" ||
 		capturedBody["role"] != "member" ||
@@ -198,7 +197,7 @@ func TestListScimWorkspaceMappings_NoFilters(t *testing.T) {
 }
 
 // TestDeleteScimWorkspaceMapping_OK verifies the DELETE path uses the
-// /v2/scim/workspaces/{id} form.
+// /v1/scim/workspaces/{id} form.
 func TestDeleteScimWorkspaceMapping_OK(t *testing.T) {
 	var capturedMethod, capturedPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +214,7 @@ func TestDeleteScimWorkspaceMapping_OK(t *testing.T) {
 	if capturedMethod != http.MethodDelete {
 		t.Errorf("method: got %q, want DELETE", capturedMethod)
 	}
-	if capturedPath != "/v2/scim/workspaces/map-1" {
-		t.Errorf("path: got %q, want /v2/scim/workspaces/map-1", capturedPath)
+	if capturedPath != "/v1/scim/workspaces/map-1" {
+		t.Errorf("path: got %q, want /v1/scim/workspaces/map-1", capturedPath)
 	}
 }

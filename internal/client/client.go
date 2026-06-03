@@ -128,9 +128,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
-	// Allow callers to pass an absolute URL (used by endpoints that live
-	// outside the configured BaseURL — e.g. SCIM endpoints are versioned
-	// independently under /v2 while the rest of the Admin API uses /v1).
+	// Allow callers to pass an absolute URL (used by endpoints that build
+	// their own full URL — e.g. the SCIM workspace mapping endpoints).
 	url := path
 	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
 		url = c.BaseURL + path
@@ -2742,15 +2741,11 @@ type CreateScimWorkspaceMappingRequest struct {
 }
 
 // scimWorkspacesURL returns the absolute URL for the SCIM workspace mappings
-// endpoints. SCIM endpoints are versioned independently from the rest of the
-// Admin API and live under /v2/scim/*, while everything else uses /v1. The
-// configured BaseURL is expected to end with /v1 (the provider default and
-// most self-hosted setups); the /v1 suffix is stripped here if present so
-// SaaS and self-hosted callers can use the same BaseURL without
-// reconfiguration.
+// endpoints. SCIM endpoints live under /v1/scim/*, alongside the rest of the
+// Admin API. The configured BaseURL is expected to end with /v1 (the provider
+// default and most self-hosted setups), so the SCIM path is appended directly.
 func (c *Client) scimWorkspacesURL(suffix string) string {
-	base := strings.TrimSuffix(c.BaseURL, "/v1")
-	return base + "/v2/scim/workspaces" + suffix
+	return c.BaseURL + "/scim/workspaces" + suffix
 }
 
 // CreateScimWorkspaceMapping creates a SCIM-group → workspace mapping.

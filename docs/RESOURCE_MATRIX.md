@@ -36,7 +36,7 @@
 | `portkey_mcp_integration_workspace_access` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT wrapping | ✅ Passing |
 | `portkey_mcp_integration_capabilities` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT | ✅ Passing |
 | `portkey_secret_reference` | ✅ | ✅ | ✅ | ✅ | ✅ | 9 typed auth blocks | ✅ Passing |
-| `portkey_scim_workspace_mapping` | ✅ | ✅ | ❌ | ✅ | ✅ | No PATCH; role/group/workspace changes ForceNew. SCIM endpoints live under `/v2/scim/*` (independent of the `/v1` Admin API) | ✅ Unit (client) + acceptance |
+| `portkey_scim_workspace_mapping` | ✅ | ✅ | ❌ | ✅ | ✅ | No PATCH; role/group/workspace changes ForceNew. SCIM endpoints live under `/v1/scim/*` | ✅ Unit (client) + acceptance |
 
 ## Data Sources
 
@@ -70,7 +70,7 @@
 | `portkey_mcp_integrations` | - | ✅ | Working | ✅ Passing |
 | `portkey_secret_reference` | ✅ | - | Working | ✅ Passing |
 | `portkey_secret_references` | - | ✅ | Working | ✅ Passing |
-| `portkey_scim_workspace_mappings` | - | ✅ | Working (`GET /v2/scim/workspaces`; SCIM API uses /v2, independent of /v1 Admin API) | ✅ 2 tests |
+| `portkey_scim_workspace_mappings` | - | ✅ | Working (`GET /v1/scim/workspaces`) | ✅ 2 tests |
 
 ## Not Implemented (API Available)
 

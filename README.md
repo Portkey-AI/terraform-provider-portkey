@@ -902,7 +902,7 @@ resource "portkey_scim_workspace_mapping" "example_members" {
 
 - The Portkey API has no PATCH for SCIM workspace mappings. Changing any field (role, workspace, group reference) triggers resource replacement.
 - Exactly one of `scim_group_id` or `scim_group_name` must be set; the resource validates this with `ExactlyOneOf` at plan time.
-- SCIM endpoints are versioned independently from the rest of the Admin API and live under `/v2/scim/*`. The provider routes SCIM calls to `/v2` transparently — `base_url` stays at `.../v1` for both SaaS and self-hosted setups, no extra configuration needed.
+- SCIM endpoints live under `/v1/scim/*`, alongside the rest of the Admin API, so no special `base_url` configuration is needed.
 
 ## Data Sources
 

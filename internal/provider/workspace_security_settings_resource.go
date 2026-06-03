@@ -282,8 +282,8 @@ func populateModelFromSecuritySettings(model *workspaceSecuritySettingsResourceM
 // applySecuritySettings fetches the current workspace, merges the user-
 // supplied plan values over the API state, and PUTs the full 35-field object.
 // It returns the merged settings that were sent so the caller can populate
-// state without having to round-trip through the API again (which would be
-// vulnerable to eventual-consistency drift).
+// state deterministically from the request payload (rather than relying on
+// the post-update GET response, which may lag due to eventual consistency).
 func (r *workspaceSecuritySettingsResource) applySecuritySettings(
 	ctx context.Context,
 	workspaceID string,

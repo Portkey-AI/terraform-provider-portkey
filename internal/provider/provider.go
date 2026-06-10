@@ -237,6 +237,7 @@ func (p *portkeyProvider) DataSources(_ context.Context) []func() datasource.Dat
 		NewMcpIntegrationsDataSource,
 		NewSecretReferenceDataSource,
 		NewSecretReferencesDataSource,
+		NewScimWorkspaceMappingsDataSource,
 	}
 }
 
@@ -262,5 +263,6 @@ func (p *portkeyProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewMcpIntegrationWorkspaceAccessResource,
 		NewMcpIntegrationCapabilitiesResource,
 		NewSecretReferenceResource,
+		NewScimWorkspaceMappingResource,
 	}
 }

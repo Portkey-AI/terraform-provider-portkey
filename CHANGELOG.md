@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- **Google Vertex AI integration onboarding** — documented `portkey_integration` setup for Vertex AI (`ai_provider_id = "vertex-ai"`) covering both auth modes: `serviceAccount` (with `vertex_service_account_json`) and `basic` (with `vertex_project_id` + `vertex_region`). Added HCL examples, configuration field tables, and a `secret_mappings` pattern for keeping the service account JSON out of Terraform state. Updated the `configurations` attribute description accordingly. (#42, thanks @muddhit-baid)
+
 ## [0.2.27] - 2026-06-10
 
 ### Added

@@ -159,6 +159,7 @@ func TestProvider_HasChildResources(t *testing.T) {
 		"portkey_mcp_integration_workspace_access",
 		"portkey_mcp_integration_capabilities",
 		"portkey_secret_reference",
+		"portkey_scim_workspace_mapping",
 	}
 
 	resources := New("test")().Resources(context.Background())
@@ -201,6 +202,7 @@ func TestProvider_HasChildDataSources(t *testing.T) {
 		"portkey_mcp_integrations",
 		"portkey_secret_reference",
 		"portkey_secret_references",
+		"portkey_scim_workspace_mappings",
 	}
 
 	dataSources := New("test")().DataSources(context.Background())

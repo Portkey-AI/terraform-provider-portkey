@@ -128,7 +128,12 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
-	url := c.BaseURL + path
+	// Allow callers to pass an absolute URL (used by endpoints that build
+	// their own full URL — e.g. the SCIM workspace mapping endpoints).
+	url := path
+	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
+		url = c.BaseURL + path
+	}
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
@@ -2760,4 +2765,106 @@ func (c *Client) ListSecretReferences(ctx context.Context, opts ListSecretRefere
 	}
 
 	return &response, nil
+}
+
+// ScimWorkspaceMapping represents a SCIM-group → workspace + role binding
+// returned by the Portkey SCIM Workspace Mappings Admin API.
+type ScimWorkspaceMapping struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	ScimGroup   string `json:"scim_group,omitempty"`
+	ScimGroupID string `json:"scim_group_id,omitempty"`
+	Role        string `json:"role"`
+}
+
+// CreateScimWorkspaceMappingRequest is the body for the SCIM Workspace
+// Mappings create endpoint. Exactly one of ScimGroupID or ScimGroupName must
+// be set; the API enforces the oneOf and rejects requests that violate it.
+type CreateScimWorkspaceMappingRequest struct {
+	WorkspaceID   string `json:"workspace_id"`
+	Role          string `json:"role"`
+	ScimGroupID   string `json:"scim_group_id,omitempty"`
+	ScimGroupName string `json:"scim_group_name,omitempty"`
+}
+
+// scimWorkspacesURL returns the absolute URL for the SCIM workspace mappings
+// endpoints. SCIM endpoints live under /v1/scim/*, alongside the rest of the
+// Admin API. The configured BaseURL is expected to end with /v1 (the provider
+// default and most self-hosted setups), so the SCIM path is appended directly.
+func (c *Client) scimWorkspacesURL(suffix string) string {
+	return c.BaseURL + "/scim/workspaces" + suffix
+}
+
+// CreateScimWorkspaceMapping creates a SCIM-group → workspace mapping.
+func (c *Client) CreateScimWorkspaceMapping(ctx context.Context, req CreateScimWorkspaceMappingRequest) (*ScimWorkspaceMapping, error) {
+	respBody, err := c.doRequest(ctx, http.MethodPost, c.scimWorkspacesURL(""), req)
+	if err != nil {
+		return nil, err
+	}
+
+	var mapping ScimWorkspaceMapping
+	if err := json.Unmarshal(respBody, &mapping); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &mapping, nil
+}
+
+// ListScimWorkspaceMappingsOptions captures the optional filters supported
+// by the SCIM workspace mappings list endpoint. Empty fields are omitted
+// from the query string.
+type ListScimWorkspaceMappingsOptions struct {
+	WorkspaceID string
+	ScimGroupID string
+	Role        string
+}
+
+// ListScimWorkspaceMappings retrieves SCIM workspace mappings, optionally
+// filtered by workspace, group, or role. The endpoint has no documented
+// pagination — total_count is returned alongside data.
+func (c *Client) ListScimWorkspaceMappings(ctx context.Context, opts ListScimWorkspaceMappingsOptions) ([]ScimWorkspaceMapping, error) {
+	var params []string
+	if opts.WorkspaceID != "" {
+		params = append(params, "workspace_id="+url.QueryEscape(opts.WorkspaceID))
+	}
+	if opts.ScimGroupID != "" {
+		params = append(params, "scim_group_id="+url.QueryEscape(opts.ScimGroupID))
+	}
+	if opts.Role != "" {
+		params = append(params, "role="+url.QueryEscape(opts.Role))
+	}
+	query := ""
+	if len(params) > 0 {
+		query = "?" + strings.Join(params, "&")
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, c.scimWorkspacesURL(query), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// The list endpoint returns items under the "mappings" key (not "data",
+	// which is the convention for other Admin API list endpoints). Accept
+	// both defensively in case Portkey ever normalizes the response shape.
+	var response struct {
+		Mappings   []ScimWorkspaceMapping `json:"mappings"`
+		Data       []ScimWorkspaceMapping `json:"data"`
+		TotalCount int                    `json:"total_count"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	if len(response.Mappings) > 0 {
+		return response.Mappings, nil
+	}
+	return response.Data, nil
+}
+
+// DeleteScimWorkspaceMapping archives a SCIM workspace mapping by mapping ID.
+// Per the API contract, this does not delete the underlying SCIM group or
+// workspace.
+func (c *Client) DeleteScimWorkspaceMapping(ctx context.Context, id string) error {
+	_, err := c.doRequest(ctx, http.MethodDelete, c.scimWorkspacesURL("/"+id), nil)
+	return err
 }

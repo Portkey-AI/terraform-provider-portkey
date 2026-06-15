@@ -126,7 +126,7 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Optional:    true,
 			},
 			"configurations": schema.StringAttribute{
-				Description: "Provider-specific configurations as JSON. For OpenAI: jsonencode({openai_organization = \"org-...\", openai_project = \"proj-...\"}). For AWS Bedrock: jsonencode({aws_role_arn = \"arn:aws:iam::...\", aws_region = \"us-east-1\"}). For Azure OpenAI: jsonencode({azure_auth_mode = \"default\", azure_resource_name = \"...\", azure_deployment_config = [{azure_deployment_name = \"...\", azure_api_version = \"...\", azure_model_slug = \"gpt-4\", is_default = true}]}).",
+				Description: "Provider-specific configurations as JSON. For OpenAI: jsonencode({openai_organization = \"org-...\", openai_project = \"proj-...\"}). For AWS Bedrock: jsonencode({aws_auth_type = \"assumedRole\", aws_role_arn = \"arn:aws:iam::...\", aws_region = \"us-east-1\"}). For Vertex AI: jsonencode({vertex_auth_type = \"serviceAccount\", vertex_region = \"us-central1\", vertex_service_account_json = jsondecode(file(\"sa.json\"))}) or jsonencode({vertex_auth_type = \"basic\", vertex_region = \"us-central1\", vertex_project_id = \"my-project\"}). For Azure OpenAI: jsonencode({azure_auth_mode = \"default\", azure_resource_name = \"...\", azure_deployment_config = [{azure_deployment_name = \"...\", azure_api_version = \"...\", azure_model_slug = \"gpt-4\", is_default = true}]}).",
 				Optional:    true,
 				Sensitive:   true,
 			},

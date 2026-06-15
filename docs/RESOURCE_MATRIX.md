@@ -12,7 +12,8 @@
 | Access Control | 1 | 2 | ✅ All passing |
 | MCP Gateway | 3 | 2 | ✅ All passing (11 tests) |
 | Secret Management | 1 | 2 | ✅ Plan-time validation covered |
-| **Total** | **18** | **28** | **All passing** |
+| Identity / SCIM | 1 | 1 | ✅ Unit + acceptance |
+| **Total** | **18** | **29** | **All passing** |
 
 ## Provider Resources
 
@@ -36,6 +37,7 @@
 | `portkey_mcp_integration_workspace_access` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT wrapping | ✅ Passing |
 | `portkey_mcp_integration_capabilities` | ✅ | ✅ | ✅ | ✅ | ✅ | Bulk PUT | ✅ Passing |
 | `portkey_secret_reference` | ✅ | ✅ | ✅ | ✅ | ✅ | 9 typed auth blocks | ✅ Passing |
+| `portkey_scim_workspace_mapping` | ✅ | ✅ | ❌ | ✅ | ✅ | No PATCH; role/group/workspace changes ForceNew. SCIM endpoints live under `/v1/scim/*` | ✅ Unit (client) + acceptance |
 
 ## Data Sources
 
@@ -69,6 +71,7 @@
 | `portkey_mcp_integrations` | - | ✅ | Working | ✅ Passing |
 | `portkey_secret_reference` | ✅ | - | Working | ✅ Passing |
 | `portkey_secret_references` | - | ✅ | Working | ✅ Passing |
+| `portkey_scim_workspace_mappings` | - | ✅ | Working (`GET /v1/scim/workspaces`) | ✅ 2 tests |
 
 ## Not Implemented (API Available)
 

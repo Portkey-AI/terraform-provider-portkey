@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.27] - 2026-06-10
+
+### Added
+- **`portkey_scim_workspace_mapping` resource** and
+  **`portkey_scim_workspace_mappings` data source** — manage SCIM-group →
+  workspace + role bindings via the Portkey SCIM Workspace Mappings Admin
+  API. Supports binding either by `scim_group_name` (pre-create before
+  the identity provider pushes the group) or by `scim_group_id` (bind to
+  an existing SCIM group). Roles: `admin`, `member`, `manager`. The
+  Portkey API has no update endpoint for SCIM mappings, so changing any
+  field forces resource replacement (RequiresReplace). SCIM endpoints
+  live under `/v1/scim/*`, alongside the rest of the Admin API, so the
+  default `base_url` (`.../v1`) works for both SaaS and self-hosted
+  callers without reconfiguration.
+
+## [0.2.26] - 2026-05-22
+
+### Fixed
+- **Workspace Usage/Rate Limits Update Consistency** - Fixed "Provider produced inconsistent result after apply" errors when updating `usage_limits` or `rate_limits` on `portkey_workspace`. The Portkey API has eventual consistency and PUT responses may return stale data. The Update handler now trusts plan values (mirroring Create behavior) and reconciles on the next Read.
+
 ## [0.2.25] - 2026-05-22
 
 ### Added

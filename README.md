@@ -34,6 +34,9 @@ This provider enables you to manage:
 ### Secret Management
 - **Secret References**: Register external secret managers (AWS Secrets Manager, Azure Key Vault, HashiCorp Vault) with plan-time validated, typed auth blocks
 
+### Identity / SCIM
+- **SCIM Workspace Mappings**: Bind SCIM-provisioned groups (e.g. Okta) to workspaces at a specific role (admin, member, manager). Useful for declaratively giving an Okta group access to a workspace at the right level without clicking through the Portkey UI.
+
 ## Requirements
 
 - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
@@ -423,6 +426,90 @@ resource "portkey_integration" "bedrock_keys" {
     aws_access_key_id = var.aws_access_key_id
     aws_region        = "us-east-1"
   })
+}
+```
+
+##### Google Vertex AI
+
+Vertex AI integrations do not use the `key` field. Set `ai_provider_id = "vertex-ai"` and pass authentication in `configurations`. See the [Create Integration API reference](https://portkey.ai/docs/api-reference/admin-api/control-plane/integrations/create-integration#body-configurations-one-of-3-vertex-auth-type) for field definitions.
+
+**Service account JSON** (`vertex_auth_type = "serviceAccount"`):
+
+```hcl
+resource "portkey_integration" "vertex_sa" {
+  name           = "Vertex AI Production"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type            = "serviceAccount"
+    vertex_region               = "us-central1"
+    vertex_service_account_json = jsondecode(file("${path.module}/vertex-sa.json"))
+  })
+}
+```
+
+**Project ID and region** (`vertex_auth_type = "basic"`): use when the gateway resolves GCP credentials from the environment (for example Application Default Credentials on GCE/GKE, or Workload Identity configured on the gateway host). Requires `vertex_project_id` and `vertex_region`.
+
+```hcl
+resource "portkey_integration" "vertex_basic" {
+  name           = "Vertex AI (ADC)"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type  = "basic"
+    vertex_region     = "us-central1"
+    vertex_project_id = "my-gcp-project-id"
+  })
+}
+```
+
+**Vertex AI configuration fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vertex_auth_type` | String | Yes | `"basic"` or `"serviceAccount"` |
+| `vertex_region` | String | Yes | GCP region (for example `us-central1`, `europe-west1`) |
+| `vertex_project_id` | String | For `basic` | GCP project ID |
+| `vertex_service_account_json` | Object | For `serviceAccount` | Full GCP service account key JSON (same structure as a downloaded key file) |
+
+**Authentication modes:**
+
+- `serviceAccount` — Gateway authenticates with the provided service account JSON. Upload or reference the JSON via `jsondecode(file(...))` or a `secret_mappings` entry (see below).
+- `basic` — Gateway uses ambient GCP credentials; you must set `vertex_project_id` and `vertex_region`.
+
+**Service account via secret reference** (keeps credentials out of Terraform state):
+
+```hcl
+resource "portkey_secret_reference" "vertex_sa" {
+  name         = "vertex-sa"
+  manager_type = "aws_sm"
+  secret_path  = "portkey/vertex/prod"
+  secret_key   = "VERTEX_SERVICE_ACCOUNT_JSON"
+
+  aws_access_key_auth = {
+    aws_region            = "us-east-1"
+    aws_access_key_id     = var.aws_access_key_id
+    aws_secret_access_key = var.aws_secret_access_key
+  }
+}
+
+resource "portkey_integration" "vertex_sa_from_secret" {
+  name           = "Vertex AI (secret ref)"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type = "serviceAccount"
+    vertex_region    = "us-central1"
+    # vertex_service_account_json supplied by the mapping below.
+  })
+
+  secret_mappings = [
+    {
+      target_field        = "configurations.vertex_service_account_json"
+      secret_reference_id = portkey_secret_reference.vertex_sa.slug
+      # Store the full service account key JSON at secret_path (or use secret_key for a nested field).
+    },
+  ]
 }
 ```
 
@@ -897,6 +984,55 @@ resource "portkey_secret_reference" "azure_entra" {
 
 See `examples/secret_reference/` for a complete, runnable example covering AWS, Azure, and Vault variants plus data source usage.
 
+### Identity / SCIM Resources
+
+#### `portkey_scim_workspace_mapping`
+
+Binds a SCIM-provisioned group (typically from Okta or Azure AD) to a Portkey workspace at a specific role. Useful for declaratively giving an IdP group access to a workspace without clicking through *Admin Settings → Authentication Settings → SCIM Provisioning → SCIM Mappings List*.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `workspace_id` | String | Yes | ID or slug of the workspace (e.g. from `portkey_workspace.foo.id`) |
+| `role` | String | Yes | Role assigned to group members in the workspace. One of: `admin`, `member`, `manager` |
+| `scim_group_id` | String | One of these two | ID of an existing SCIM group |
+| `scim_group_name` | String | One of these two | Display name of the SCIM group. Used to pre-create the mapping before the IdP pushes the group. Must not match Portkey's auto-provisioning pattern (e.g. `ws-<name>-role-admin`) |
+
+**Computed**
+
+| Attribute | Description |
+|-----------|-------------|
+| `id` | Unique identifier of the mapping |
+| `scim_group` | Display name of the mapped SCIM group as returned by the Portkey API |
+
+**Example**
+
+```hcl
+resource "portkey_workspace" "example" {
+  name        = "Example Workspace"
+  description = "Example workspace"
+}
+
+resource "portkey_scim_workspace_mapping" "example_admins" {
+  workspace_id    = portkey_workspace.example.id
+  scim_group_name = "app-portkey-stage-ws-example-admins"
+  role            = "admin"
+}
+
+resource "portkey_scim_workspace_mapping" "example_members" {
+  workspace_id    = portkey_workspace.example.id
+  scim_group_name = "app-portkey-stage-ws-example-members"
+  role            = "member"
+}
+```
+
+**Import**: `terraform import portkey_scim_workspace_mapping.example workspace-id/mapping-id`
+
+**Notes**
+
+- The Portkey API has no PATCH for SCIM workspace mappings. Changing any field (role, workspace, group reference) triggers resource replacement.
+- Exactly one of `scim_group_id` or `scim_group_name` must be set; the resource validates this with `ExactlyOneOf` at plan time.
+- SCIM endpoints live under `/v1/scim/*`, alongside the rest of the Admin API, so no special `base_url` configuration is needed.
+
 ## Data Sources
 
 ### Organization Data Sources
@@ -948,6 +1084,12 @@ See `examples/secret_reference/` for a complete, runnable example covering AWS, 
 | `portkey_secret_references` | List secret references (paginated, filterable by `search`, `manager_type`) | - |
 
 > **Note:** Neither data source exposes the `auth_config` block. The API returns credential fields masked, so surfacing them in a data source would only leak placeholder values and invite state drift.
+
+### Identity / SCIM Data Sources
+
+| Data Source | Description | Key Arguments |
+|-------------|-------------|---------------|
+| `portkey_scim_workspace_mappings` | List SCIM workspace mappings | `workspace_id`, `scim_group_id`, `role` (all optional filters) |
 
 ## Development
 

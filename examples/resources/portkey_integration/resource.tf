@@ -88,3 +88,36 @@ variable "aws_secret_access_key" {
   type      = string
   sensitive = true
 }
+
+# ----------------------------------------------------------------------------
+# Google Vertex AI — service account JSON (no provider API key).
+# See: https://portkey.ai/docs/api-reference/admin-api/control-plane/integrations/create-integration#body-configurations-one-of-3-vertex-auth-type
+# ----------------------------------------------------------------------------
+resource "portkey_integration" "vertex_sa" {
+  name           = "vertex-production"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type            = "serviceAccount"
+    vertex_region               = "us-central1"
+    vertex_service_account_json = jsondecode(file("${path.module}/vertex-sa.json"))
+  })
+}
+
+# ----------------------------------------------------------------------------
+# Google Vertex AI — basic auth (project + region; gateway uses ambient GCP creds).
+# ----------------------------------------------------------------------------
+resource "portkey_integration" "vertex_basic" {
+  name           = "vertex-adc"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type  = "basic"
+    vertex_region     = "us-central1"
+    vertex_project_id = var.gcp_project_id
+  })
+}
+
+variable "gcp_project_id" {
+  type = string
+}

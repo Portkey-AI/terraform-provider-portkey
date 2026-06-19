@@ -410,6 +410,100 @@ resource "portkey_integration" "test" {
 `, name)
 }
 
+func TestAccIntegrationResource_withAzureOpenAIWorkloadAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-workload")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureOpenAIWorkload(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureOpenAIWorkload(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-openai"
+
+  configurations = jsonencode({
+    azure_auth_mode          = "workload"
+    azure_resource_name      = "test-azure-resource"
+    azure_workload_tenant_id = "test-tenant-id-12345"
+    azure_workload_client_id = "test-workload-client-id-12345"
+    is_key_required          = false
+    azure_deployment_config = [
+      {
+        alias                 = "gpt-4o-alias"
+        azure_deployment_name = "gpt-4o-deployment"
+        azure_api_version     = "2024-08-01-preview"
+        azure_model_slug      = "gpt-4o"
+        is_default            = false
+      }
+    ]
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureOpenAIEntraFederatedAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-entra-fed")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureOpenAIEntraFederated(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-openai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureOpenAIEntraFederated(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-openai"
+
+  configurations = jsonencode({
+    azure_auth_mode       = "entraFederated"
+    azure_resource_name   = "test-azure-resource"
+    azure_entra_tenant_id = "test-tenant-id-12345"
+    azure_entra_client_id = "test-client-id-12345"
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4-deployment"
+        azure_api_version     = "2024-02-15-preview"
+        azure_model_slug      = "gpt-4"
+        is_default            = true
+      }
+    ]
+  })
+}
+`, name)
+}
+
 func TestAccIntegrationResource_withAzureOpenAIManagedAuth(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-azure-managed")
 
@@ -707,4 +801,239 @@ resource "portkey_integration" "test" {
   workspace_id   = %[2]q
 }
 `, name, workspaceID)
+}
+
+func TestAccIntegrationResource_withVertexAIWorkloadAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-vertex-workload")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithVertexAIWorkload(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "vertex-ai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithVertexAIWorkload(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type                 = "workload"
+    vertex_project_id                = "test-gcp-project-id"
+    vertex_region                    = "us-central1"
+    is_key_required                  = false
+    vertex_skip_ptu_cost_attribution = false
+    vertex_map_metadata              = false
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureAIFoundryDefaultAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-ai-default")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureAIFoundryDefault(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-ai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureAIFoundryDefault(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-ai"
+  key            = "test-azure-ai-api-key-12345"
+
+  configurations = jsonencode({
+    azure_auth_mode       = "default"
+    azure_foundry_url     = "https://test-resource.services.ai.azure.com/models"
+    azure_api_version     = "2024-05-01-preview"
+    azure_deployment_name = "gpt-4o"
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureAIFoundryEntraAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-ai-entra")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureAIFoundryEntra(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-ai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureAIFoundryEntra(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-ai"
+
+  configurations = jsonencode({
+    azure_auth_mode           = "entra"
+    azure_foundry_url         = "https://test-resource.services.ai.azure.com/models"
+    azure_entra_tenant_id     = "test-tenant-id-12345"
+    azure_entra_client_id     = "test-client-id-12345"
+    azure_entra_client_secret = "test-client-secret-12345"
+    is_key_required           = false
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureAIFoundryEntraFederatedAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-ai-entra-fed")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureAIFoundryEntraFederated(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-ai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureAIFoundryEntraFederated(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-ai"
+
+  configurations = jsonencode({
+    azure_auth_mode       = "entraFederated"
+    azure_foundry_url     = "https://test-resource.services.ai.azure.com/models"
+    azure_entra_tenant_id = "test-tenant-id-12345"
+    azure_entra_client_id = "test-client-id-12345"
+    is_key_required       = false
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureAIFoundryManagedAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-ai-managed")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureAIFoundryManaged(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-ai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureAIFoundryManaged(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-ai"
+
+  configurations = jsonencode({
+    azure_auth_mode         = "managed"
+    azure_foundry_url       = "https://test-resource.services.ai.azure.com/models"
+    azure_managed_client_id = "test-managed-client-id-12345"
+    is_key_required         = false
+  })
+}
+`, name)
+}
+
+func TestAccIntegrationResource_withAzureAIFoundryWorkloadAuth(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-azure-ai-workload")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccIntegrationResourceConfigWithAzureAIFoundryWorkload(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_integration.test", "id"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_integration.test", "ai_provider_id", "azure-ai"),
+					resource.TestCheckResourceAttr("portkey_integration.test", "status", "active"),
+				),
+			},
+		},
+	})
+}
+
+func testAccIntegrationResourceConfigWithAzureAIFoundryWorkload(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_integration" "test" {
+  name           = %[1]q
+  ai_provider_id = "azure-ai"
+
+  configurations = jsonencode({
+    azure_auth_mode          = "workload"
+    azure_foundry_url        = "https://test-resource.services.ai.azure.com/models"
+    azure_workload_tenant_id = "test-tenant-id-12345"
+    azure_workload_client_id = "test-workload-client-id-12345"
+    is_key_required          = false
+  })
+}
+`, name)
 }

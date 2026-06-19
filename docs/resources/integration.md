@@ -3,12 +3,12 @@
 page_title: "portkey_integration Resource - portkey"
 subcategory: ""
 description: |-
-  Manages a Portkey integration. Integrations connect Portkey to AI providers like OpenAI, Anthropic, Azure, etc.
+  Manages a Portkey integration. Integrations connect Portkey to AI providers like OpenAI, Anthropic, Azure OpenAI, Azure AI Foundry, Google Vertex AI, and more.
 ---
 
 # portkey_integration (Resource)
 
-Manages a Portkey integration. Integrations connect Portkey to AI providers like OpenAI, Anthropic, Azure, etc.
+Manages a Portkey integration. Integrations connect Portkey to AI providers like OpenAI, Anthropic, Azure OpenAI, Azure AI Foundry, Google Vertex AI, and more.
 
 ## Workspace-Level Integrations
 
@@ -42,6 +42,65 @@ resource "portkey_integration" "openai_dev" {
 }
 ```
 
+### Azure OpenAI with Entra Federated auth
+
+```terraform
+resource "portkey_integration" "azure_openai" {
+  name           = "Azure OpenAI"
+  ai_provider_id = "azure-openai"
+
+  configurations = jsonencode({
+    azure_auth_mode       = "entraFederated"
+    azure_resource_name   = "my-azure-resource"
+    azure_entra_tenant_id = var.azure_tenant_id
+    azure_entra_client_id = var.azure_client_id
+    azure_deployment_config = [
+      {
+        azure_deployment_name = "gpt-4o"
+        azure_api_version     = "2025-03-01-preview"
+        azure_model_slug      = "gpt-4o"
+        is_default            = true
+      }
+    ]
+  })
+}
+```
+
+### Azure AI Foundry with Workload Identity
+
+```terraform
+resource "portkey_integration" "azure_foundry" {
+  name           = "Azure AI Foundry"
+  ai_provider_id = "azure-ai"
+
+  configurations = jsonencode({
+    azure_auth_mode          = "workload"
+    azure_foundry_url        = "https://my-project.services.ai.azure.com/models"
+    azure_workload_tenant_id = var.azure_tenant_id
+    azure_workload_client_id = var.azure_workload_client_id
+    is_key_required          = false
+  })
+}
+```
+
+### Google Vertex AI with Workload Identity
+
+```terraform
+resource "portkey_integration" "vertex_ai" {
+  name           = "Vertex AI"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type                 = "workload"
+    vertex_project_id                = var.gcp_project_id
+    vertex_region                    = "us-central1"
+    is_key_required                  = false
+    vertex_skip_ptu_cost_attribution = false
+    vertex_map_metadata              = false
+  })
+}
+```
+
 ### Integration with restricted model access
 
 ```terraform
@@ -65,13 +124,29 @@ resource "portkey_integration_model_access" "gpt4" {
 
 ### Required
 
-- `ai_provider_id` (String) ID of the AI provider (e.g., 'openai', 'anthropic', 'azure-openai').
+- `ai_provider_id` (String) ID of the AI provider (e.g., `openai`, `anthropic`, `azure-openai`, `azure-ai`, `vertex-ai`, `bedrock`).
 - `name` (String) Human-readable name for the integration.
 
 ### Optional
 
 - `allow_all_models` (Boolean) Whether all models are enabled by default for this integration. When true (the default), all models for the provider are available. Set to false to restrict access to only models explicitly enabled via `portkey_integration_model_access` resources. Defaults to `true`.
-- `configurations` (String, Sensitive) Provider-specific configurations as JSON. For AWS Bedrock with IAM Role, use: jsonencode({aws_role_arn = "arn:aws:iam::...", aws_region = "us-east-1"}). For Azure OpenAI: jsonencode({azure_auth_mode = "default", azure_resource_name = "...", azure_deployment_config = [{azure_deployment_name = "...", azure_api_version = "...", azure_model_slug = "gpt-4", is_default = true}]}). This is write-only and will not be returned by the API.
+- `configurations` (String, Sensitive) Provider-specific configurations as JSON. This is write-only and will not be returned by the API. See provider-specific examples below.
+
+  **Azure OpenAI** (`azure-openai`) — `azure_auth_mode` controls auth. Common fields: `azure_resource_name`, `azure_deployment_config[]`. Auth modes:
+  - `default` — API key via `key`
+  - `entra` — `azure_entra_tenant_id`, `azure_entra_client_id`, `azure_entra_client_secret`
+  - `entraFederated` — `azure_entra_tenant_id`, `azure_entra_client_id`
+  - `managed` — `azure_managed_client_id` (optional)
+  - `workload` — `azure_workload_tenant_id`, `azure_workload_client_id`
+
+  **Azure AI Foundry** (`azure-ai`) — same `azure_auth_mode` values as above. Common fields: `azure_foundry_url` (required), `azure_api_version` (optional), `azure_deployment_name` (optional). Optional: `is_key_required` (default `false`).
+
+  **Google Vertex AI** (`vertex-ai`) — `vertex_auth_type` controls auth. Common fields: `vertex_region` (required). Optional: `is_key_required`, `vertex_skip_ptu_cost_attribution`, `vertex_map_metadata`. Auth types:
+  - `workload` — `vertex_project_id`
+  - `serviceAccount` — `vertex_service_account_json`
+  - `basic` — `vertex_project_id`, API key via `key`
+
+  **AWS Bedrock** (`bedrock`) — `aws_auth_type`, `aws_region`, `aws_access_key_id`, `aws_secret_access_key`, or `aws_role_arn`.
 - `description` (String) Optional description of the integration.
 - `key` (String, Sensitive) API key for the provider. This is write-only and will not be returned by the API.
 - `key_wo` (String, Write-Only) API key for the provider (write-only). Never stored in Terraform state or shown in plan output. Requires Terraform 1.11+. Use with key_version to control when the key is sent to the API.

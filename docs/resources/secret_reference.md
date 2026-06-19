@@ -268,7 +268,7 @@ resource "portkey_integration" "openai" {
 }
 ```
 
-### Providers with structured configuration (AWS Bedrock, Azure OpenAI, ...)
+### Providers with structured configuration (AWS Bedrock, Vertex AI, Azure OpenAI, ...)
 
 Inline the non-sensitive fields and let a mapping populate only the sensitive one:
 
@@ -289,6 +289,28 @@ resource "portkey_integration" "bedrock" {
       target_field        = "configurations.aws_secret_access_key"
       secret_reference_id = portkey_secret_reference.bedrock_key.slug
       secret_key          = "AWS_SECRET_ACCESS_KEY" # override for multi-value secrets
+    },
+  ]
+}
+```
+
+For Vertex AI service account JSON stored as a JSON blob in the secret manager:
+
+```terraform
+resource "portkey_integration" "vertex" {
+  name           = "vertex-production"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type = "serviceAccount"
+    vertex_region    = "us-central1"
+  })
+
+  secret_mappings = [
+    {
+      target_field        = "configurations.vertex_service_account_json"
+      secret_reference_id = portkey_secret_reference.vertex_sa.slug
+      # The referenced secret value must be the full GCP service account key JSON.
     },
   ]
 }

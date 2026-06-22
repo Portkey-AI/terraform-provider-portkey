@@ -127,12 +127,12 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 			"configurations": schema.StringAttribute{
 				Description: "Provider-specific configurations as JSON string. Stored in Terraform state (sensitive); not returned by the API. See provider docs for full field reference. " +
-				"azure-openai: {azure_auth_mode, azure_resource_name, azure_deployment_config[]}. auth modes: default (API key), entra (+ azure_entra_tenant_id, azure_entra_client_id, azure_entra_client_secret), entraFederated (+ azure_entra_tenant_id, azure_entra_client_id), managed (+ azure_managed_client_id), workload (+ azure_workload_tenant_id, azure_workload_client_id). " +
-				"azure-ai: {azure_auth_mode, azure_foundry_url, azure_api_version?, azure_deployment_name?, is_key_required?}. Same auth modes as azure-openai. " +
-				"vertex-ai: {vertex_auth_type, vertex_region, is_key_required?, vertex_skip_ptu_cost_attribution?, vertex_map_metadata?}. auth type: workload (+ vertex_project_id). " +
-				"bedrock: {aws_auth_type, aws_region, aws_role_arn | aws_access_key_id + aws_secret_access_key}.",
-				Optional:    true,
-				Sensitive:   true,
+					"azure-openai: {azure_auth_mode, azure_resource_name, azure_deployment_config[]}. auth modes: default (API key), entra (+ azure_entra_tenant_id, azure_entra_client_id, azure_entra_client_secret), entraFederated (+ azure_entra_tenant_id, azure_entra_client_id), managed (+ azure_managed_client_id), workload (+ azure_workload_tenant_id, azure_workload_client_id). " +
+					"azure-ai: {azure_auth_mode, azure_foundry_url, azure_api_version?, azure_deployment_name?, is_key_required?}. Same auth modes as azure-openai. " +
+					"vertex-ai: {vertex_auth_type, vertex_region, is_key_required?, vertex_skip_ptu_cost_attribution?, vertex_map_metadata?}. auth type: workload (+ vertex_project_id). " +
+					"bedrock: {aws_auth_type, aws_region, aws_role_arn | aws_access_key_id + aws_secret_access_key}.",
+				Optional:  true,
+				Sensitive: true,
 			},
 			"description": schema.StringAttribute{
 				Description: "Optional description of the integration.",

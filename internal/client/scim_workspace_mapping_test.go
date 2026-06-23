@@ -3,9 +3,11 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -176,8 +178,8 @@ func TestListScimWorkspaceMappings_WithFilters(t *testing.T) {
 	}
 }
 
-// TestListScimWorkspaceMappings_NoFilters omits the query string entirely
-// when no filter is set.
+// TestListScimWorkspaceMappings_NoFilters sends pagination params (but no
+// filter params) when no filter is set.
 func TestListScimWorkspaceMappings_NoFilters(t *testing.T) {
 	var capturedRawQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,8 +193,62 @@ func TestListScimWorkspaceMappings_NoFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if capturedRawQuery != "" {
-		t.Errorf("expected no query string with empty options, got %q", capturedRawQuery)
+	if !strings.Contains(capturedRawQuery, "page_size=100") || !strings.Contains(capturedRawQuery, "page=0") {
+		t.Errorf("expected pagination params, got %q", capturedRawQuery)
+	}
+	for _, f := range []string{"workspace_id=", "scim_group_id=", "role="} {
+		if strings.Contains(capturedRawQuery, f) {
+			t.Errorf("unexpected filter %q in query %q", f, capturedRawQuery)
+		}
+	}
+}
+
+// TestListScimWorkspaceMappings_Paginates walks every page and returns the
+// full set, not just the first page. Regression test for mappings past the
+// first page being invisible to Read/import (the cause of spurious
+// "Cannot import non-existent remote object" errors when an org has more
+// mappings than fit on one page).
+func TestListScimWorkspaceMappings_Paginates(t *testing.T) {
+	// Spans several pages — full pages plus a short final one — to prove the
+	// client keeps paging past the first response.
+	const total = 230
+	const pageSize = 100
+	var pagesRequested []int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		pagesRequested = append(pagesRequested, page)
+
+		start := page * pageSize
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
+		var items []string
+		for i := start; i < end; i++ {
+			items = append(items, fmt.Sprintf(`{"id":"map-%d","workspace_id":"ws-x","scim_group":"G","scim_group_id":"sg","role":"member"}`, i))
+		}
+		_, _ = fmt.Fprintf(w, `{"total_count":%d,"page":%d,"page_size":%d,"mappings":[%s]}`, total, page, pageSize, strings.Join(items, ","))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newTestClient(t, srv.URL+"/v1")
+	got, err := c.ListScimWorkspaceMappings(context.Background(), ListScimWorkspaceMappingsOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != total {
+		t.Fatalf("expected %d mappings across pages, got %d", total, len(got))
+	}
+	// A mapping from beyond the first page must be present — that's what the
+	// single-page bug dropped.
+	if want := fmt.Sprintf("map-%d", pageSize); got[pageSize].ID != want {
+		t.Errorf("expected %q at index %d, got %q", want, pageSize, got[pageSize].ID)
+	}
+	// Pages requested in order until the data ran out (ceil(total/pageSize)).
+	wantPages := (total + pageSize - 1) / pageSize
+	if len(pagesRequested) != wantPages {
+		t.Errorf("expected %d page requests, got %v", wantPages, pagesRequested)
 	}
 }
 

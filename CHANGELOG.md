@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.28] - 2026-06-24
+
+### Changed
+- **Enhanced `portkey_integration` documentation** - Expanded the `configurations` field documentation and resource guide to include comprehensive examples for Azure OpenAI (Entra Federated, Workload Identity), Azure AI Foundry (Default, Entra, Entra Federated, Managed Identity, Workload Identity), and Google Vertex AI (Workload Identity) authentication modes. Added 8 new acceptance tests to validate these configuration patterns.
+
 ## [0.2.27] - 2026-06-10
 
 ### Added
@@ -315,7 +320,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace deletion may be blocked by existing resources
 - Prompt template updates create new versions (use makeDefault to promote)
 
-[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.25...HEAD
+[Unreleased]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.28...HEAD
+[0.2.28]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.27...v0.2.28
+[0.2.27]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.26...v0.2.27
+[0.2.26]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.25...v0.2.26
 [0.2.25]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.24...v0.2.25
 [0.2.17]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/Portkey-AI/terraform-provider-portkey/compare/v0.2.15...v0.2.16

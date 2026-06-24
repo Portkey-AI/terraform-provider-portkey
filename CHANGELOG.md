@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Workspace Cascade-Delete on Destroy** - `portkey_workspace` now sets `force_delete=true` when deleting, so `terraform destroy` cascades through dependent resources (providers/virtual-keys, configs, workspace API keys) automatically. Previously, workspaces with any dependents would fail with `409 AB07` and operators had to manually delete each dependent via the API before retrying.
+
 ### Fixed
 - **SCIM Workspace Mappings Pagination** - Fixed `ListScimWorkspaceMappings` to paginate through all results instead of returning only the first page (100 items). Organizations with more than 100 SCIM workspace mappings would see `terraform import` fail with "Cannot import non-existent remote object" for mappings beyond the first page, and the `portkey_scim_workspace_mappings` data source would return incomplete results.
+- **Workspace Deleted Out-of-Band State Reconciliation** - `portkey_workspace` Read now treats 403/404 responses as missing-resource (instead of a hard error), allowing Terraform to reconcile state when a workspace is deleted outside Terraform (e.g., via the Portkey UI). Previously, deleting a workspace out-of-band caused every subsequent `terraform plan` to fail.
 
 ## [0.2.28] - 2026-06-24
 

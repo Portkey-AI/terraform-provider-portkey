@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **SCIM Workspace Mappings Pagination** - Fixed `ListScimWorkspaceMappings` to paginate through all results instead of returning only the first page (100 items). Organizations with more than 100 SCIM workspace mappings would see `terraform import` fail with "Cannot import non-existent remote object" for mappings beyond the first page, and the `portkey_scim_workspace_mappings` data source would return incomplete results.
+
 ## [0.2.28] - 2026-06-24
 
 ### Changed

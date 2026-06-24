@@ -2772,46 +2772,77 @@ type ListScimWorkspaceMappingsOptions struct {
 	Role        string
 }
 
+// scimWorkspaceMappingsPageSize is the page size used when listing SCIM
+// workspace mappings. The endpoint caps each response at a server-side
+// default (100) and exposes the rest via the zero-indexed `page` parameter;
+// requesting an explicit page_size keeps the paging math predictable.
+const scimWorkspaceMappingsPageSize = 100
+
 // ListScimWorkspaceMappings retrieves SCIM workspace mappings, optionally
-// filtered by workspace, group, or role. The endpoint has no documented
-// pagination — total_count is returned alongside data.
+// filtered by workspace, group, or role.
+//
+// The endpoint IS paginated: it returns at most `page_size` items (default
+// 100) per response, with the remainder reachable via the zero-indexed
+// `page` query parameter and the running `total_count`. This method walks
+// every page and returns the full set. Fetching only the first page silently
+// drops mappings past position 100 — which made Read/import report otherwise
+// healthy mappings as "non-existent" once an org crossed 100 mappings.
 func (c *Client) ListScimWorkspaceMappings(ctx context.Context, opts ListScimWorkspaceMappingsOptions) ([]ScimWorkspaceMapping, error) {
-	var params []string
+	var filters []string
 	if opts.WorkspaceID != "" {
-		params = append(params, "workspace_id="+url.QueryEscape(opts.WorkspaceID))
+		filters = append(filters, "workspace_id="+url.QueryEscape(opts.WorkspaceID))
 	}
 	if opts.ScimGroupID != "" {
-		params = append(params, "scim_group_id="+url.QueryEscape(opts.ScimGroupID))
+		filters = append(filters, "scim_group_id="+url.QueryEscape(opts.ScimGroupID))
 	}
 	if opts.Role != "" {
-		params = append(params, "role="+url.QueryEscape(opts.Role))
-	}
-	query := ""
-	if len(params) > 0 {
-		query = "?" + strings.Join(params, "&")
+		filters = append(filters, "role="+url.QueryEscape(opts.Role))
 	}
 
-	respBody, err := c.doRequest(ctx, http.MethodGet, c.scimWorkspacesURL(query), nil)
-	if err != nil {
-		return nil, err
+	var all []ScimWorkspaceMapping
+	for page := 0; ; page++ {
+		params := append([]string(nil), filters...)
+		params = append(params,
+			fmt.Sprintf("page_size=%d", scimWorkspaceMappingsPageSize),
+			fmt.Sprintf("page=%d", page),
+		)
+		query := "?" + strings.Join(params, "&")
+
+		respBody, err := c.doRequest(ctx, http.MethodGet, c.scimWorkspacesURL(query), nil)
+		if err != nil {
+			return nil, err
+		}
+
+		// The list endpoint returns items under the "mappings" key (not "data",
+		// which is the convention for other Admin API list endpoints). Accept
+		// both defensively in case Portkey ever normalizes the response shape.
+		var response struct {
+			Mappings   []ScimWorkspaceMapping `json:"mappings"`
+			Data       []ScimWorkspaceMapping `json:"data"`
+			TotalCount int                    `json:"total_count"`
+		}
+		if err := json.Unmarshal(respBody, &response); err != nil {
+			return nil, fmt.Errorf("error unmarshaling response: %w", err)
+		}
+
+		batch := response.Mappings
+		if len(batch) == 0 {
+			batch = response.Data
+		}
+		all = append(all, batch...)
+
+		// Stop once the last page is consumed: a short/empty page means there
+		// is no more data, and a known total_count lets us stop without an
+		// extra empty round-trip when the final page is exactly full.
+		if len(batch) < scimWorkspaceMappingsPageSize {
+			break
+		}
+		if response.TotalCount > 0 && len(all) >= response.TotalCount {
+			break
+		}
 	}
 
-	// The list endpoint returns items under the "mappings" key (not "data",
-	// which is the convention for other Admin API list endpoints). Accept
-	// both defensively in case Portkey ever normalizes the response shape.
-	var response struct {
-		Mappings   []ScimWorkspaceMapping `json:"mappings"`
-		Data       []ScimWorkspaceMapping `json:"data"`
-		TotalCount int                    `json:"total_count"`
-	}
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	if len(response.Mappings) > 0 {
-		return response.Mappings, nil
-	}
-	return response.Data, nil
+	return all, nil
 }
 
 // DeleteScimWorkspaceMapping archives a SCIM workspace mapping by mapping ID.

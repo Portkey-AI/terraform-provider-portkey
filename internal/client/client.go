@@ -197,7 +197,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 // WorkspaceDefaults represents the defaults configuration for a workspace
 type WorkspaceDefaults struct {
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	InputGuardrails  []string          `json:"input_guardrails,omitempty"`
+	OutputGuardrails []string          `json:"output_guardrails,omitempty"`
 }
 
 // Workspace represents a Portkey workspace

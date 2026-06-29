@@ -214,6 +214,164 @@ resource "portkey_workspace" "test" {
 `, name)
 }
 
+func TestAccWorkspaceResource_withGuardrails(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-guard")
+	workspaceID := getTestWorkspaceID()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create with input and output guardrails
+			{
+				Config: testAccWorkspaceResourceConfigWithGuardrails(rName, workspaceID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_workspace.test", "id"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "name", rName),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "input_guardrails.#", "1"),
+					resource.TestCheckResourceAttrSet("portkey_workspace.test", "input_guardrails.0"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "output_guardrails.#", "1"),
+					resource.TestCheckResourceAttrSet("portkey_workspace.test", "output_guardrails.0"),
+				),
+			},
+			// ImportState testing
+			{
+				ResourceName:            "portkey_workspace.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_at", "updated_at"},
+			},
+			// Update: swap the input guardrail to also include two entries
+			{
+				Config: testAccWorkspaceResourceConfigWithGuardrailsUpdated(rName, workspaceID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("portkey_workspace.test", "input_guardrails.#", "2"),
+					resource.TestCheckResourceAttr("portkey_workspace.test", "output_guardrails.#", "1"),
+				),
+			},
+			// Delete testing automatically occurs in TestCase
+		},
+	})
+}
+
+func testAccWorkspaceResourceConfigWithGuardrails(name, workspaceID string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_guardrail" "input" {
+  name         = "%[1]s-input"
+  workspace_id = %[2]q
+  checks = jsonencode([
+    {
+      id = "default.wordCount"
+      parameters = {
+        minWords = 1
+        maxWords = 1000
+      }
+    }
+  ])
+  actions = jsonencode({
+    onFail  = "log"
+    message = "Input word count check failed"
+  })
+}
+
+resource "portkey_guardrail" "output" {
+  name         = "%[1]s-output"
+  workspace_id = %[2]q
+  checks = jsonencode([
+    {
+      id = "default.wordCount"
+      parameters = {
+        minWords = 1
+        maxWords = 2000
+      }
+    }
+  ])
+  actions = jsonencode({
+    onFail  = "log"
+    message = "Output word count check failed"
+  })
+}
+
+resource "portkey_workspace" "test" {
+  name        = %[3]q
+  description = "Workspace with default guardrails"
+
+  input_guardrails  = [portkey_guardrail.input.slug]
+  output_guardrails = [portkey_guardrail.output.slug]
+}
+`, name, workspaceID, name)
+}
+
+func testAccWorkspaceResourceConfigWithGuardrailsUpdated(name, workspaceID string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_guardrail" "input" {
+  name         = "%[1]s-input"
+  workspace_id = %[2]q
+  checks = jsonencode([
+    {
+      id = "default.wordCount"
+      parameters = {
+        minWords = 1
+        maxWords = 1000
+      }
+    }
+  ])
+  actions = jsonencode({
+    onFail  = "log"
+    message = "Input word count check failed"
+  })
+}
+
+resource "portkey_guardrail" "input2" {
+  name         = "%[1]s-input2"
+  workspace_id = %[2]q
+  checks = jsonencode([
+    {
+      id = "default.characterCount"
+      parameters = {
+        minCharacters = 1
+        maxCharacters = 5000
+      }
+    }
+  ])
+  actions = jsonencode({
+    onFail  = "log"
+    message = "Input character count check failed"
+  })
+}
+
+resource "portkey_guardrail" "output" {
+  name         = "%[1]s-output"
+  workspace_id = %[2]q
+  checks = jsonencode([
+    {
+      id = "default.wordCount"
+      parameters = {
+        minWords = 1
+        maxWords = 2000
+      }
+    }
+  ])
+  actions = jsonencode({
+    onFail  = "log"
+    message = "Output word count check failed"
+  })
+}
+
+resource "portkey_workspace" "test" {
+  name        = %[3]q
+  description = "Workspace with default guardrails"
+
+  input_guardrails  = [portkey_guardrail.input.slug, portkey_guardrail.input2.slug]
+  output_guardrails = [portkey_guardrail.output.slug]
+}
+`, name, workspaceID, name)
+}
+
 func TestAccWorkspaceResource_withUsageLimits(t *testing.T) {
 	rName := acctest.RandomWithPrefix("tf-acc-wslim")
 

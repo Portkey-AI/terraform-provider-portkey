@@ -23,8 +23,10 @@ Fetches a specific Portkey workspace by ID.
 
 - `created_at` (String) Timestamp when the workspace was created.
 - `description` (String) Description of the workspace.
+- `input_guardrails` (List of String) Default input guardrail IDs or slugs applied to this workspace.
 - `metadata` (Map of String) Custom metadata attached to the workspace.
 - `name` (String) Name of the workspace.
+- `output_guardrails` (List of String) Default output guardrail IDs or slugs applied to this workspace.
 - `rate_limits` (Attributes List) Rate limits for this workspace. (see [below for nested schema](#nestedatt--rate_limits))
 - `updated_at` (String) Timestamp when the workspace was last updated.
 - `usage_limits` (Attributes List) Usage limits for this workspace. (see [below for nested schema](#nestedatt--usage_limits))

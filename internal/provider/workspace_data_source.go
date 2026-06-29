@@ -29,14 +29,16 @@ type workspaceDataSource struct {
 
 // workspaceDataSourceModel maps the data source schema data.
 type workspaceDataSourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"`
-	UsageLimits types.List   `tfsdk:"usage_limits"`
-	RateLimits  types.List   `tfsdk:"rate_limits"`
-	Metadata    types.Map    `tfsdk:"metadata"`
-	CreatedAt   types.String `tfsdk:"created_at"`
-	UpdatedAt   types.String `tfsdk:"updated_at"`
+	ID               types.String `tfsdk:"id"`
+	Name             types.String `tfsdk:"name"`
+	Description      types.String `tfsdk:"description"`
+	UsageLimits      types.List   `tfsdk:"usage_limits"`
+	RateLimits       types.List   `tfsdk:"rate_limits"`
+	Metadata         types.Map    `tfsdk:"metadata"`
+	InputGuardrails  types.List   `tfsdk:"input_guardrails"`
+	OutputGuardrails types.List   `tfsdk:"output_guardrails"`
+	CreatedAt        types.String `tfsdk:"created_at"`
+	UpdatedAt        types.String `tfsdk:"updated_at"`
 }
 
 // Metadata returns the data source type name.
@@ -107,6 +109,16 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 			},
 			"metadata": schema.MapAttribute{
 				Description: "Custom metadata attached to the workspace.",
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"input_guardrails": schema.ListAttribute{
+				Description: "Default input guardrail IDs or slugs applied to this workspace.",
+				Computed:    true,
+				ElementType: types.StringType,
+			},
+			"output_guardrails": schema.ListAttribute{
+				Description: "Default output guardrail IDs or slugs applied to this workspace.",
 				Computed:    true,
 				ElementType: types.StringType,
 			},
@@ -192,6 +204,30 @@ func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadReque
 		state.Metadata = metadataMap
 	} else {
 		state.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle input_guardrails
+	if workspace.Defaults != nil && len(workspace.Defaults.InputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.InputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.InputGuardrails = list
+	} else {
+		state.InputGuardrails = types.ListNull(types.StringType)
+	}
+
+	// Handle output_guardrails
+	if workspace.Defaults != nil && len(workspace.Defaults.OutputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.OutputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.OutputGuardrails = list
+	} else {
+		state.OutputGuardrails = types.ListNull(types.StringType)
 	}
 
 	state.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))

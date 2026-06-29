@@ -37,15 +37,17 @@ type workspaceResource struct {
 
 // workspaceResourceModel maps the resource schema data.
 type workspaceResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	Icon        types.String `tfsdk:"icon"`
-	Description types.String `tfsdk:"description"`
-	UsageLimits types.List   `tfsdk:"usage_limits"`
-	RateLimits  types.List   `tfsdk:"rate_limits"`
-	Metadata    types.Map    `tfsdk:"metadata"`
-	CreatedAt   types.String `tfsdk:"created_at"`
-	UpdatedAt   types.String `tfsdk:"updated_at"`
+	ID               types.String `tfsdk:"id"`
+	Name             types.String `tfsdk:"name"`
+	Icon             types.String `tfsdk:"icon"`
+	Description      types.String `tfsdk:"description"`
+	UsageLimits      types.List   `tfsdk:"usage_limits"`
+	RateLimits       types.List   `tfsdk:"rate_limits"`
+	Metadata         types.Map    `tfsdk:"metadata"`
+	InputGuardrails  types.List   `tfsdk:"input_guardrails"`
+	OutputGuardrails types.List   `tfsdk:"output_guardrails"`
+	CreatedAt        types.String `tfsdk:"created_at"`
+	UpdatedAt        types.String `tfsdk:"updated_at"`
 }
 
 // stripIconPrefix removes the icon emoji prefix from a workspace name.
@@ -155,6 +157,16 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Optional:    true,
 				ElementType: types.StringType,
 			},
+			"input_guardrails": schema.ListAttribute{
+				Description: "List of guardrail IDs or slugs to apply as input guardrails by default for this workspace. Omit to leave the existing guardrails unchanged on the backend.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
+			"output_guardrails": schema.ListAttribute{
+				Description: "List of guardrail IDs or slugs to apply as output guardrails by default for this workspace. Omit to leave the existing guardrails unchanged on the backend.",
+				Optional:    true,
+				ElementType: types.StringType,
+			},
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the workspace was created.",
 				Computed:    true,
@@ -220,7 +232,8 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 	createReq.UsageLimits = usageLimits
 	createReq.RateLimits = rateLimits
 
-	// Handle metadata
+	// Handle metadata and guardrails — they share the same Defaults object,
+	// so build it incrementally rather than overwriting.
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
 		var metadata map[string]string
 		diags = plan.Metadata.ElementsAs(ctx, &metadata, false)
@@ -228,9 +241,36 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		createReq.Defaults = &client.WorkspaceDefaults{
-			Metadata: metadata,
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.WorkspaceDefaults{}
 		}
+		createReq.Defaults.Metadata = metadata
+	}
+
+	if !plan.InputGuardrails.IsNull() && !plan.InputGuardrails.IsUnknown() {
+		var guardrails []string
+		diags = plan.InputGuardrails.ElementsAs(ctx, &guardrails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.WorkspaceDefaults{}
+		}
+		createReq.Defaults.InputGuardrails = guardrails
+	}
+
+	if !plan.OutputGuardrails.IsNull() && !plan.OutputGuardrails.IsUnknown() {
+		var guardrails []string
+		diags = plan.OutputGuardrails.ElementsAs(ctx, &guardrails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if createReq.Defaults == nil {
+			createReq.Defaults = &client.WorkspaceDefaults{}
+		}
+		createReq.Defaults.OutputGuardrails = guardrails
 	}
 
 	workspace, err := r.client.CreateWorkspace(ctx, createReq)
@@ -297,6 +337,35 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 		plan.Metadata = metadataMap
 	} else if plan.Metadata.IsNull() {
 		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle guardrails from API response. Trust plan values when the user
+	// specified a non-empty list, since the API may be eventually consistent
+	// and may not echo the new values immediately (mirrors usage_limits).
+	if !plan.InputGuardrails.IsNull() && !plan.InputGuardrails.IsUnknown() && len(plan.InputGuardrails.Elements()) > 0 {
+		// Keep plan values.
+	} else if workspace.Defaults != nil && len(workspace.Defaults.InputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.InputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.InputGuardrails = list
+	} else {
+		plan.InputGuardrails = types.ListNull(types.StringType)
+	}
+
+	if !plan.OutputGuardrails.IsNull() && !plan.OutputGuardrails.IsUnknown() && len(plan.OutputGuardrails.Elements()) > 0 {
+		// Keep plan values.
+	} else if workspace.Defaults != nil && len(workspace.Defaults.OutputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.OutputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.OutputGuardrails = list
+	} else {
+		plan.OutputGuardrails = types.ListNull(types.StringType)
 	}
 
 	// Set state to fully populated data
@@ -409,6 +478,30 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 		state.Metadata = types.MapNull(types.StringType)
 	}
 
+	// Handle input_guardrails from API
+	if workspace.Defaults != nil && len(workspace.Defaults.InputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.InputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.InputGuardrails = list
+	} else {
+		state.InputGuardrails = types.ListNull(types.StringType)
+	}
+
+	// Handle output_guardrails from API
+	if workspace.Defaults != nil && len(workspace.Defaults.OutputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.OutputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.OutputGuardrails = list
+	} else {
+		state.OutputGuardrails = types.ListNull(types.StringType)
+	}
+
 	state.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	state.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
@@ -467,7 +560,8 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	updateReq.UsageLimits = usageRaw
 	updateReq.RateLimits = rateRaw
 
-	// Handle metadata
+	// Handle metadata and guardrails — they share the same Defaults object,
+	// so build it incrementally rather than overwriting.
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
 		var metadata map[string]string
 		diags = plan.Metadata.ElementsAs(ctx, &metadata, false)
@@ -475,9 +569,36 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		updateReq.Defaults = &client.WorkspaceDefaults{
-			Metadata: metadata,
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.WorkspaceDefaults{}
 		}
+		updateReq.Defaults.Metadata = metadata
+	}
+
+	if !plan.InputGuardrails.IsNull() && !plan.InputGuardrails.IsUnknown() {
+		var guardrails []string
+		diags = plan.InputGuardrails.ElementsAs(ctx, &guardrails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.WorkspaceDefaults{}
+		}
+		updateReq.Defaults.InputGuardrails = guardrails
+	}
+
+	if !plan.OutputGuardrails.IsNull() && !plan.OutputGuardrails.IsUnknown() {
+		var guardrails []string
+		diags = plan.OutputGuardrails.ElementsAs(ctx, &guardrails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if updateReq.Defaults == nil {
+			updateReq.Defaults = &client.WorkspaceDefaults{}
+		}
+		updateReq.Defaults.OutputGuardrails = guardrails
 	}
 
 	workspace, err := r.client.UpdateWorkspace(ctx, plan.ID.ValueString(), updateReq)
@@ -562,6 +683,34 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		plan.Metadata = metadataMap
 	} else if plan.Metadata.IsNull() {
 		plan.Metadata = types.MapNull(types.StringType)
+	}
+
+	// Handle guardrails from API response. Trust plan values when the user
+	// specified a non-empty list (API may be eventually consistent).
+	if !plan.InputGuardrails.IsNull() && !plan.InputGuardrails.IsUnknown() && len(plan.InputGuardrails.Elements()) > 0 {
+		// Keep plan values.
+	} else if workspace.Defaults != nil && len(workspace.Defaults.InputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.InputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.InputGuardrails = list
+	} else {
+		plan.InputGuardrails = types.ListNull(types.StringType)
+	}
+
+	if !plan.OutputGuardrails.IsNull() && !plan.OutputGuardrails.IsUnknown() && len(plan.OutputGuardrails.Elements()) > 0 {
+		// Keep plan values.
+	} else if workspace.Defaults != nil && len(workspace.Defaults.OutputGuardrails) > 0 {
+		list, gDiags := types.ListValueFrom(ctx, types.StringType, workspace.Defaults.OutputGuardrails)
+		resp.Diagnostics.Append(gDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		plan.OutputGuardrails = list
+	} else {
+		plan.OutputGuardrails = types.ListNull(types.StringType)
 	}
 
 	diags = resp.State.Set(ctx, plan)

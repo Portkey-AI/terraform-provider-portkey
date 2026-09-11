@@ -17,7 +17,7 @@ Fetches a specific Portkey workspace by ID.
 
 ### Required
 
-- `id` (String) Workspace identifier.
+- `id` (String) Workspace identifier — either the slug (as stored in portkey_workspace.id) or the workspace UUID. Returned exactly as configured.
 
 ### Read-Only
 

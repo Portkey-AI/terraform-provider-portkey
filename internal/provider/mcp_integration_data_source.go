@@ -146,7 +146,12 @@ func (d *mcpIntegrationDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	state.ID = types.StringValue(integration.ID)
+	// "id" is a Required argument, so it must be returned exactly as configured.
+	// Terraform rejects a data source whose result differs from its config, and
+	// when the read is deferred to apply the mismatch also invalidates the plan
+	// of every resource that interpolated this value.
+	// GET accepts either a UUID or a slug; the computed "slug" attribute below still
+	// reports the canonical slug regardless of which form was configured.
 	state.Slug = types.StringValue(integration.Slug)
 	state.Name = types.StringValue(integration.Name)
 	state.URL = types.StringValue(integration.URL)

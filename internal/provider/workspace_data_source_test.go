@@ -22,6 +22,13 @@ func TestAccWorkspaceDataSource_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("data.portkey_workspace.test", "name", rName),
 					resource.TestCheckResourceAttr("data.portkey_workspace.test", "description", "Test description"),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "id"),
+					// "id" is a Required argument: the data source must echo the
+					// configured value (a slug here), not the UUID the API returns.
+					// Rewriting it breaks downstream plans at apply time.
+					resource.TestCheckResourceAttrPair(
+						"data.portkey_workspace.test", "id",
+						"portkey_workspace.test", "id",
+					),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "created_at"),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "updated_at"),
 				),

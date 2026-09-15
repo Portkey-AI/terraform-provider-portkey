@@ -123,3 +123,51 @@ data "portkey_mcp_integration" "test" {
 }
 `, name, authType, transport)
 }
+
+// TestAccMcpIntegrationDataSource_slugPreserved tests that the data source
+// returns "id" exactly as configured when looked up by slug. GET accepts either
+// form but always echoes the UUID, so assigning the API value to state.ID made
+// the attribute change between plan and apply.
+func TestAccMcpIntegrationDataSource_slugPreserved(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-mcp-ds-slug")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccMcpIntegrationDataSourceSlugConfig(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// The configured slug must survive the read unchanged...
+					resource.TestCheckResourceAttrPair(
+						"data.portkey_mcp_integration.by_slug", "id",
+						"portkey_mcp_integration.test", "slug",
+					),
+					// ...and must NOT have been replaced by the API's UUID.
+					resource.TestCheckResourceAttrPair(
+						"data.portkey_mcp_integration.by_slug", "slug",
+						"portkey_mcp_integration.test", "slug",
+					),
+					resource.TestCheckResourceAttr("data.portkey_mcp_integration.by_slug", "name", rName),
+				),
+			},
+		},
+	})
+}
+
+func testAccMcpIntegrationDataSourceSlugConfig(name string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_mcp_integration" "test" {
+  name      = %[1]q
+  url       = "https://example.com/mcp"
+  auth_type = "none"
+  transport = "sse"
+}
+
+data "portkey_mcp_integration" "by_slug" {
+  id = portkey_mcp_integration.test.slug
+}
+`, name)
+}

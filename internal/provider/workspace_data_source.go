@@ -50,7 +50,7 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 		Description: "Fetches a specific Portkey workspace by ID.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Workspace identifier — either the slug (as stored in portkey_workspace.id) or the workspace UUID. Returned exactly as configured.",
+				Description: "Workspace identifier. Accepts either the workspace UUID or its slug; whichever form is configured is returned unchanged.",
 				Required:    true,
 			},
 			"name": schema.StringAttribute{
@@ -163,11 +163,12 @@ func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadReque
 
 	// Map response to state.
 	//
-	// state.ID is deliberately left as configured: "id" is a Required argument.
-	// GET /admin/workspaces/{id} accepts either a slug or a UUID but always echoes
-	// the UUID, while portkey_workspace stores the slug in its own id. Assigning the
-	// API value here changed the attribute between plan and apply, which broke every
-	// resource interpolating it ("Provider produced inconsistent final plan").
+	// state.ID is deliberately left as configured: "id" is a Required argument, so
+	// Terraform requires it back unchanged. GET /admin/workspaces/{id} accepts a slug
+	// as well as a UUID but always echoes the UUID, so assigning the API value here
+	// rewrote a caller-supplied slug. When the read is deferred to apply, that changes
+	// the attribute between plan and apply and invalidates the plan of every resource
+	// interpolating it ("Provider produced inconsistent final plan").
 	state.Name = types.StringValue(workspace.Name)
 	state.Description = types.StringValue(workspace.Description)
 

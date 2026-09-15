@@ -130,7 +130,10 @@ func (d *promptCollectionDataSource) Read(ctx context.Context, req datasource.Re
 	}
 
 	// Map response to state
-	state.ID = types.StringValue(collection.ID)
+	// "id" is a Required argument, so it must be returned exactly as configured.
+	// Terraform rejects a data source whose result differs from its config, and
+	// when the read is deferred to apply the mismatch also invalidates the plan
+	// of every resource that interpolated this value.
 	state.Name = types.StringValue(collection.Name)
 	state.WorkspaceID = types.StringValue(collection.WorkspaceID)
 	state.Slug = types.StringValue(collection.Slug)

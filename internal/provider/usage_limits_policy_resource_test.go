@@ -3,10 +3,13 @@ package provider
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccUsageLimitsPolicyResource_basic(t *testing.T) {
@@ -265,4 +268,263 @@ resource "portkey_usage_limits_policy" "test_excludes" {
   periodic_reset = "monthly"
 }
 `, name, workspaceID)
+}
+
+// TestAccUsageLimitsPolicyResource_updateConditionsInPlace is the regression test for
+// the budget-counter reset bug. `conditions` used to carry a RequiresReplace plan
+// modifier, so adding a user to a policy destroyed it and created a new one. The
+// replacement got a fresh UUID and, because spend counters are keyed by policy ID
+// server-side, an accumulated usage of zero — silently handing every affected user
+// their full budget again.
+//
+// The plan check is the assertion that matters: it fails if Terraform ever goes back to
+// planning a replacement. The ID check confirms the same policy survived the apply.
+func TestAccUsageLimitsPolicyResource_updateConditionsInPlace(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-cond")
+	workspaceID := getTestWorkspaceID()
+
+	var policyID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigWithUsers(rName, workspaceID, []string{"aqua-agent-bot"}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCapturePolicyID("portkey_usage_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_usage_limits_policy.test", "conditions",
+						`[{"key":"metadata._user","value":["aqua-agent-bot"]}]`),
+				),
+			},
+			// Adding a user must update in place, not replace.
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigWithUsers(rName, workspaceID, []string{"aqua-agent-bot", "blue-agent-bot"}),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("portkey_usage_limits_policy.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckPolicyIDUnchanged("portkey_usage_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_usage_limits_policy.test", "conditions",
+						`[{"key":"metadata._user","value":["aqua-agent-bot","blue-agent-bot"]}]`),
+				),
+			},
+			// Removing a user must also update in place.
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigWithUsers(rName, workspaceID, []string{"blue-agent-bot"}),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("portkey_usage_limits_policy.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckPolicyIDUnchanged("portkey_usage_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_usage_limits_policy.test", "conditions",
+						`[{"key":"metadata._user","value":["blue-agent-bot"]}]`),
+				),
+			},
+		},
+	})
+}
+
+// TestAccUsageLimitsPolicyResource_clearAlertThreshold covers the companion bug: Update
+// skipped alert_threshold entirely when the plan value was null, so removing the
+// attribute from HCL left the old threshold live on the server.
+func TestAccUsageLimitsPolicyResource_clearAlertThreshold(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-thresh")
+	workspaceID := getTestWorkspaceID()
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigThreshold(rName, workspaceID, "alert_threshold = 800.0"),
+				Check: resource.TestCheckResourceAttr(
+					"portkey_usage_limits_policy.test", "alert_threshold", "800"),
+			},
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigThreshold(rName, workspaceID, ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("portkey_usage_limits_policy.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckNoResourceAttr(
+					"portkey_usage_limits_policy.test", "alert_threshold"),
+			},
+		},
+	})
+}
+
+// TestAccUsageLimitsPolicyResource_switchResetCadence exercises the two other
+// attributes that used to force replacement. Switching between periodic_reset and
+// periodic_reset_days is supported by the API in place, and the provider must send the
+// cleared side as an explicit null so the two never end up set at once.
+func TestAccUsageLimitsPolicyResource_switchResetCadence(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-cadence")
+	workspaceID := getTestWorkspaceID()
+
+	var policyID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigCadence(rName, workspaceID, `periodic_reset = "monthly"`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCapturePolicyID("portkey_usage_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_usage_limits_policy.test", "periodic_reset", "monthly"),
+				),
+			},
+			// monthly -> weekly, in place
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigCadence(rName, workspaceID, `periodic_reset = "weekly"`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("portkey_usage_limits_policy.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckPolicyIDUnchanged("portkey_usage_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_usage_limits_policy.test", "periodic_reset", "weekly"),
+				),
+			},
+			// periodic_reset -> periodic_reset_days, in place; the old field must clear
+			{
+				Config: testAccUsageLimitsPolicyResourceConfigCadence(rName, workspaceID, `periodic_reset_days = 45`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("portkey_usage_limits_policy.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckPolicyIDUnchanged("portkey_usage_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_usage_limits_policy.test", "periodic_reset_days", "45"),
+					resource.TestCheckNoResourceAttr("portkey_usage_limits_policy.test", "periodic_reset"),
+				),
+			},
+		},
+	})
+}
+
+// testAccCapturePolicyID records the resource's id so a later step can assert the same
+// object survived, rather than a replacement wearing the same name.
+func testAccCapturePolicyID(resourceName string, target *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found in state: %s", resourceName)
+		}
+		if rs.Primary.ID == "" {
+			return fmt.Errorf("resource %s has no ID set", resourceName)
+		}
+		*target = rs.Primary.ID
+		return nil
+	}
+}
+
+// testAccCheckPolicyIDUnchanged fails if the policy was recreated. A new ID means the
+// server-side usage counter was left behind with the archived policy.
+func testAccCheckPolicyIDUnchanged(resourceName string, want *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found in state: %s", resourceName)
+		}
+		if *want == "" {
+			return fmt.Errorf("no baseline ID captured for %s", resourceName)
+		}
+		if rs.Primary.ID != *want {
+			return fmt.Errorf(
+				"policy was replaced instead of updated in place: id was %s, now %s (accumulated usage is lost on replacement)",
+				*want, rs.Primary.ID,
+			)
+		}
+		return nil
+	}
+}
+
+func testAccUsageLimitsPolicyResourceConfigWithUsers(name, workspaceID string, users []string) string {
+	quoted := make([]string, 0, len(users))
+	for _, u := range users {
+		quoted = append(quoted, fmt.Sprintf("%q", u))
+	}
+
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_usage_limits_policy" "test" {
+  name         = %[1]q
+  workspace_id = %[2]q
+  conditions   = jsonencode([
+    {
+      key   = "metadata._user"
+      value = [%[3]s]
+    }
+  ])
+  group_by = jsonencode([
+    {
+      key = "metadata._user"
+    }
+  ])
+  type           = "cost"
+  credit_limit   = 1000.0
+  periodic_reset = "monthly"
+}
+`, name, workspaceID, strings.Join(quoted, ", "))
+}
+
+func testAccUsageLimitsPolicyResourceConfigThreshold(name, workspaceID, thresholdLine string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_usage_limits_policy" "test" {
+  name         = %[1]q
+  workspace_id = %[2]q
+  conditions   = jsonencode([
+    {
+      key   = "workspace_id"
+      value = %[2]q
+    }
+  ])
+  group_by = jsonencode([
+    {
+      key = "api_key"
+    }
+  ])
+  type           = "cost"
+  credit_limit   = 1000.0
+  periodic_reset = "monthly"
+  %[3]s
+}
+`, name, workspaceID, thresholdLine)
+}
+
+func testAccUsageLimitsPolicyResourceConfigCadence(name, workspaceID, cadenceLine string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_usage_limits_policy" "test" {
+  name         = %[1]q
+  workspace_id = %[2]q
+  conditions   = jsonencode([
+    {
+      key   = "workspace_id"
+      value = %[2]q
+    }
+  ])
+  group_by = jsonencode([
+    {
+      key = "api_key"
+    }
+  ])
+  type         = "cost"
+  credit_limit = 1000.0
+  %[3]s
+}
+`, name, workspaceID, cadenceLine)
 }

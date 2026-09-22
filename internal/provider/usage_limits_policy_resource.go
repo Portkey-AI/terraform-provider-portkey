@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -85,11 +84,8 @@ func (r *usageLimitsPolicyResource) Schema(_ context.Context, _ resource.SchemaR
 			},
 			"conditions": schema.StringAttribute{
 				CustomType:  jsontypes.NormalizedType{},
-				Description: "JSON array of conditions that define which requests the policy applies to. Each condition has 'key', 'value' (string or array of strings), and an optional 'excludes' (string or array of strings).",
+				Description: "JSON array of conditions that define which requests the policy applies to. Each condition has 'key', 'value' (string or array of strings), and an optional 'excludes' (string or array of strings). Updated in place; changing it does not reset the policy's accumulated usage.",
 				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"group_by": schema.StringAttribute{
 				CustomType:  jsontypes.NormalizedType{},
@@ -120,18 +116,12 @@ func (r *usageLimitsPolicyResource) Schema(_ context.Context, _ resource.SchemaR
 				Validators: []validator.String{
 					stringvalidator.OneOf("monthly", "weekly"),
 				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"periodic_reset_days": schema.Int64Attribute{
 				Description: "Custom reset interval in days (1–365). Mutually exclusive with periodic_reset.",
 				Optional:    true,
 				Validators: []validator.Int64{
 					int64validator.Between(1, 365),
-				},
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.RequiresReplace(),
 				},
 			},
 			"next_usage_reset_at": schema.StringAttribute{
@@ -145,6 +135,9 @@ func (r *usageLimitsPolicyResource) Schema(_ context.Context, _ resource.SchemaR
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the policy was created.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"updated_at": schema.StringAttribute{
 				Description: "Timestamp when the policy was last updated.",
@@ -334,23 +327,48 @@ func (r *usageLimitsPolicyResource) Update(ctx context.Context, req resource.Upd
 		return
 	}
 
-	// Build update request
-	updateReq := client.UpdateUsageLimitsPolicyRequest{}
+	// Parse conditions JSON
+	var conditions []client.PolicyCondition
+	if err := json.Unmarshal([]byte(plan.Conditions.ValueString()), &conditions); err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid Conditions JSON",
+			"The conditions attribute must be a valid JSON array: "+err.Error(),
+		)
+		return
+	}
 
-	if plan.Name.ValueString() != state.Name.ValueString() {
+	// Build update request. Terraform is declarative, so the mutable attributes are
+	// sent on every update rather than diffed: that way removing an optional attribute
+	// from the configuration actually clears it server-side. The reset cadence is the
+	// exception — see below.
+	updateReq := client.UpdateUsageLimitsPolicyRequest{
+		Conditions: conditions,
+	}
+
+	// The API rejects a null name, so an unset name is omitted rather than cleared.
+	if !plan.Name.IsNull() && !plan.Name.IsUnknown() {
 		updateReq.Name = plan.Name.ValueString()
 	}
 
-	if plan.CreditLimit.ValueFloat64() != state.CreditLimit.ValueFloat64() {
-		creditLimit := plan.CreditLimit.ValueFloat64()
-		updateReq.CreditLimit = &creditLimit
+	creditLimit := plan.CreditLimit.ValueFloat64()
+	updateReq.CreditLimit = &creditLimit
+
+	// A nil AlertThreshold marshals to an explicit null, which clears it.
+	if !plan.AlertThreshold.IsNull() && !plan.AlertThreshold.IsUnknown() {
+		alertThreshold := plan.AlertThreshold.ValueFloat64()
+		updateReq.AlertThreshold = &alertThreshold
 	}
 
-	if !plan.AlertThreshold.IsNull() && !plan.AlertThreshold.IsUnknown() {
-		if plan.AlertThreshold.ValueFloat64() != state.AlertThreshold.ValueFloat64() {
-			alertThreshold := plan.AlertThreshold.ValueFloat64()
-			updateReq.AlertThreshold = &alertThreshold
-		}
+	// periodic_reset and periodic_reset_days are sent only when they change. The API
+	// recomputes next_usage_reset_at whenever either field is present in the body, and
+	// for periodic_reset_days that recomputation is "now + N days" — re-sending an
+	// unchanged value on every apply would keep pushing the reset date into the future
+	// and the policy would never reset.
+	if !plan.PeriodicReset.Equal(state.PeriodicReset) {
+		updateReq.PeriodicReset = nullableJSON(plan.PeriodicReset.IsNull() || plan.PeriodicReset.IsUnknown(), plan.PeriodicReset.ValueString())
+	}
+	if !plan.PeriodicResetDays.Equal(state.PeriodicResetDays) {
+		updateReq.PeriodicResetDays = nullableJSON(plan.PeriodicResetDays.IsNull() || plan.PeriodicResetDays.IsUnknown(), plan.PeriodicResetDays.ValueInt64())
 	}
 
 	policy, err := r.client.UpdateUsageLimitsPolicy(ctx, state.ID.ValueString(), updateReq)
@@ -362,8 +380,16 @@ func (r *usageLimitsPolicyResource) Update(ctx context.Context, req resource.Upd
 		return
 	}
 
+	// Preserve plan values for the JSON attributes so Terraform's post-apply
+	// consistency check doesn't fail if the API echoes a different key ordering.
+	planConditions := plan.Conditions
+	planGroupBy := plan.GroupBy
+
 	// Map response to plan
 	r.mapPolicyToState(&plan, policy, false)
+
+	plan.Conditions = planConditions
+	plan.GroupBy = planGroupBy
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -399,7 +425,10 @@ func (r *usageLimitsPolicyResource) ImportState(ctx context.Context, req resourc
 }
 
 // mapPolicyToState maps a UsageLimitsPolicy API response to the Terraform state model
-// preserveRequiresReplace controls whether to preserve state values for RequiresReplace attributes
+// preserveRequiresReplace, when true (the Read path), keeps the user-authored value
+// from state for attributes the API may echo back in a different shape, instead of
+// overwriting state from the response. Note that this also means changes made outside
+// Terraform to those attributes are not detected as drift.
 func (r *usageLimitsPolicyResource) mapPolicyToState(state *usageLimitsPolicyResourceModel, policy *client.UsageLimitsPolicy, preserveRequiresReplace bool) {
 	state.ID = types.StringValue(policy.ID)
 	state.Name = types.StringValue(policy.Name)
@@ -407,7 +436,7 @@ func (r *usageLimitsPolicyResource) mapPolicyToState(state *usageLimitsPolicyRes
 	if state.WorkspaceID.IsNull() || state.WorkspaceID.IsUnknown() {
 		state.WorkspaceID = types.StringValue(policy.WorkspaceID)
 	}
-	// Preserve type from state to avoid triggering RequiresReplace unnecessarily
+	// type still forces replacement: the API's update endpoint does not accept it
 	if !preserveRequiresReplace || state.Type.IsNull() || state.Type.IsUnknown() {
 		state.Type = types.StringValue(policy.Type)
 	}
@@ -420,7 +449,7 @@ func (r *usageLimitsPolicyResource) mapPolicyToState(state *usageLimitsPolicyRes
 		state.AlertThreshold = types.Float64Null()
 	}
 
-	// Preserve periodic_reset from state to avoid triggering RequiresReplace unnecessarily
+	// Keep the configured periodic_reset rather than the API echo
 	if !preserveRequiresReplace || state.PeriodicReset.IsNull() || state.PeriodicReset.IsUnknown() {
 		if policy.PeriodicReset != "" {
 			state.PeriodicReset = types.StringValue(policy.PeriodicReset)
@@ -429,7 +458,7 @@ func (r *usageLimitsPolicyResource) mapPolicyToState(state *usageLimitsPolicyRes
 		}
 	}
 
-	// Preserve periodic_reset_days from state to avoid triggering RequiresReplace unnecessarily
+	// Keep the configured periodic_reset_days rather than the API echo
 	if !preserveRequiresReplace || state.PeriodicResetDays.IsNull() || state.PeriodicResetDays.IsUnknown() {
 		if policy.PeriodicResetDays != nil {
 			state.PeriodicResetDays = types.Int64Value(int64(*policy.PeriodicResetDays))
@@ -464,6 +493,22 @@ func (r *usageLimitsPolicyResource) mapPolicyToState(state *usageLimitsPolicyRes
 	if !policy.UpdatedAt.IsZero() {
 		state.UpdatedAt = types.StringValue(policy.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	}
+}
+
+// nullableJSON renders v for an API field where an explicit JSON null means "clear this
+// field" and an omitted field means "leave unchanged". Returning nil omits the field,
+// which is the safe fallback: it leaves the server value untouched rather than clearing
+// it. Only string and int64 are instantiated and encoding/json cannot fail for either,
+// so the error branch is defensive.
+func nullableJSON[T string | int64](isNull bool, v T) json.RawMessage {
+	if isNull {
+		return json.RawMessage("null")
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // canonicalJSON re-encodes v through interface{} so map keys are alphabetically sorted.

@@ -2,10 +2,12 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
 func TestAccRateLimitsPolicyResource_basic(t *testing.T) {
@@ -152,4 +154,73 @@ resource "portkey_rate_limits_policy" "test_excludes" {
   value = 50
 }
 `, name, workspaceID)
+}
+
+// TestAccRateLimitsPolicyResource_updateConditionsInPlace mirrors the usage-limits
+// regression test. `conditions` carried the same RequiresReplace marker here, and the
+// API accepts it on PUT, so a targeting change must update in place rather than tear
+// the policy down and rebuild it.
+func TestAccRateLimitsPolicyResource_updateConditionsInPlace(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-rl-cond")
+	workspaceID := getTestWorkspaceID()
+
+	var policyID string
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRateLimitsPolicyResourceConfigWithUsers(rName, workspaceID, []string{"aqua-agent-bot"}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCapturePolicyID("portkey_rate_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_rate_limits_policy.test", "conditions",
+						`[{"key":"metadata._user","value":["aqua-agent-bot"]}]`),
+				),
+			},
+			{
+				Config: testAccRateLimitsPolicyResourceConfigWithUsers(rName, workspaceID, []string{"aqua-agent-bot", "blue-agent-bot"}),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("portkey_rate_limits_policy.test", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckPolicyIDUnchanged("portkey_rate_limits_policy.test", &policyID),
+					resource.TestCheckResourceAttr("portkey_rate_limits_policy.test", "conditions",
+						`[{"key":"metadata._user","value":["aqua-agent-bot","blue-agent-bot"]}]`),
+				),
+			},
+		},
+	})
+}
+
+func testAccRateLimitsPolicyResourceConfigWithUsers(name, workspaceID string, users []string) string {
+	quoted := make([]string, 0, len(users))
+	for _, u := range users {
+		quoted = append(quoted, fmt.Sprintf("%q", u))
+	}
+
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+resource "portkey_rate_limits_policy" "test" {
+  name         = %[1]q
+  workspace_id = %[2]q
+  conditions   = jsonencode([
+    {
+      key   = "metadata._user"
+      value = [%[3]s]
+    }
+  ])
+  group_by = jsonencode([
+    {
+      key = "metadata._user"
+    }
+  ])
+  type  = "requests"
+  unit  = "rpm"
+  value = 100
+}
+`, name, workspaceID, strings.Join(quoted, ", "))
 }

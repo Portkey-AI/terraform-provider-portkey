@@ -2084,12 +2084,35 @@ type CreateUsageLimitsPolicyRequest struct {
 	PeriodicResetDays *int              `json:"periodic_reset_days,omitempty"`
 }
 
-// UpdateUsageLimitsPolicyRequest represents the request to update a usage limits policy
+// UpdateUsageLimitsPolicyRequest represents the request to update a usage limits policy.
+//
+// The Portkey API treats an omitted field as "leave unchanged" and an explicit null as
+// "clear", so the field types below are chosen to express that distinction:
+//
+//   - AlertThreshold has no omitempty: a nil pointer marshals to null and clears the
+//     threshold. The API accepts null here (optional({nullable: true})).
+//   - PeriodicReset and PeriodicResetDays are json.RawMessage so they can be omitted
+//     (nil), cleared (the literal "null"), or set. They are only sent when they
+//     actually change: the API recomputes next_usage_reset_at whenever a reset field is
+//     present, and for periodic_reset_days that recomputation is "now + N days", so
+//     re-sending an unchanged value on every apply would push the reset date forward
+//     indefinitely.
+//   - Name keeps omitempty. The API rejects a null name (plain .optional()), so the
+//     field cannot be cleared and must be omitted instead.
+//   - Conditions has no omitempty, matching CreateUsageLimitsPolicyRequest. With
+//     omitempty a zero-length slice would be dropped, so an update from a populated
+//     array to [] would leave the server's targeting live while the provider recorded
+//     the empty array in state. Sending "conditions":[] instead surfaces the API's own
+//     rejection (the endpoint requires isArray({min: 1})) rather than diverging
+//     silently. The resource always populates this field.
 type UpdateUsageLimitsPolicyRequest struct {
-	Name           string   `json:"name,omitempty"`
-	CreditLimit    *float64 `json:"credit_limit,omitempty"`
-	AlertThreshold *float64 `json:"alert_threshold,omitempty"`
-	Status         string   `json:"status,omitempty"`
+	Name              string            `json:"name,omitempty"`
+	Conditions        []PolicyCondition `json:"conditions"`
+	CreditLimit       *float64          `json:"credit_limit,omitempty"`
+	AlertThreshold    *float64          `json:"alert_threshold"`
+	PeriodicReset     json.RawMessage   `json:"periodic_reset,omitempty"`
+	PeriodicResetDays json.RawMessage   `json:"periodic_reset_days,omitempty"`
+	Status            string            `json:"status,omitempty"`
 }
 
 // CreateUsageLimitsPolicyResponse represents the response from creating a usage limits policy
@@ -2195,10 +2218,11 @@ type CreateRateLimitsPolicyRequest struct {
 
 // UpdateRateLimitsPolicyRequest represents the request to update a rate limits policy
 type UpdateRateLimitsPolicyRequest struct {
-	Name   string   `json:"name,omitempty"`
-	Unit   string   `json:"unit,omitempty"`
-	Value  *float64 `json:"value,omitempty"`
-	Status string   `json:"status,omitempty"`
+	Name       string            `json:"name,omitempty"`
+	Conditions []PolicyCondition `json:"conditions"`
+	Unit       string            `json:"unit,omitempty"`
+	Value      *float64          `json:"value,omitempty"`
+	Status     string            `json:"status,omitempty"`
 }
 
 // CreateRateLimitsPolicyResponse represents the response from creating a rate limits policy

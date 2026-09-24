@@ -77,11 +77,8 @@ func (r *rateLimitsPolicyResource) Schema(_ context.Context, _ resource.SchemaRe
 			},
 			"conditions": schema.StringAttribute{
 				CustomType:  jsontypes.NormalizedType{},
-				Description: "JSON array of conditions that define which requests the policy applies to. Each condition has 'key', 'value' (string or array of strings), and an optional 'excludes' (string or array of strings).",
+				Description: "JSON array of conditions that define which requests the policy applies to. Each condition has 'key', 'value' (string or array of strings), and an optional 'excludes' (string or array of strings). Updated in place; changing it does not recreate the policy.",
 				Required:    true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"group_by": schema.StringAttribute{
 				CustomType:  jsontypes.NormalizedType{},
@@ -113,6 +110,9 @@ func (r *rateLimitsPolicyResource) Schema(_ context.Context, _ resource.SchemaRe
 			"created_at": schema.StringAttribute{
 				Description: "Timestamp when the policy was created.",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"updated_at": schema.StringAttribute{
 				Description: "Timestamp when the policy was last updated.",
@@ -269,21 +269,30 @@ func (r *rateLimitsPolicyResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
-	// Build update request
-	updateReq := client.UpdateRateLimitsPolicyRequest{}
+	// Parse conditions JSON
+	var conditions []client.PolicyCondition
+	if err := json.Unmarshal([]byte(plan.Conditions.ValueString()), &conditions); err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid Conditions JSON",
+			"The conditions attribute must be a valid JSON array: "+err.Error(),
+		)
+		return
+	}
 
-	if plan.Name.ValueString() != state.Name.ValueString() {
+	// Build update request. The mutable attributes are sent on every update rather than
+	// diffed, so the request always describes the configured desired state.
+	updateReq := client.UpdateRateLimitsPolicyRequest{
+		Conditions: conditions,
+		Unit:       plan.Unit.ValueString(),
+	}
+
+	// The API rejects a null name, so an unset name is omitted rather than cleared.
+	if !plan.Name.IsNull() && !plan.Name.IsUnknown() {
 		updateReq.Name = plan.Name.ValueString()
 	}
 
-	if plan.Unit.ValueString() != state.Unit.ValueString() {
-		updateReq.Unit = plan.Unit.ValueString()
-	}
-
-	if plan.Value.ValueFloat64() != state.Value.ValueFloat64() {
-		value := plan.Value.ValueFloat64()
-		updateReq.Value = &value
-	}
+	value := plan.Value.ValueFloat64()
+	updateReq.Value = &value
 
 	policy, err := r.client.UpdateRateLimitsPolicy(ctx, state.ID.ValueString(), updateReq)
 	if err != nil {
@@ -294,8 +303,16 @@ func (r *rateLimitsPolicyResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
+	// Preserve plan values for the JSON attributes so Terraform's post-apply
+	// consistency check doesn't fail if the API echoes a different key ordering.
+	planConditions := plan.Conditions
+	planGroupBy := plan.GroupBy
+
 	// Map response to plan
 	r.mapPolicyToState(&plan, policy, false)
+
+	plan.Conditions = planConditions
+	plan.GroupBy = planGroupBy
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -331,7 +348,10 @@ func (r *rateLimitsPolicyResource) ImportState(ctx context.Context, req resource
 }
 
 // mapPolicyToState maps a RateLimitsPolicy API response to the Terraform state model
-// preserveRequiresReplace controls whether to preserve state values for RequiresReplace attributes
+// preserveRequiresReplace, when true (the Read path), keeps the user-authored value
+// from state for attributes the API may echo back in a different shape, instead of
+// overwriting state from the response. Note that this also means changes made outside
+// Terraform to those attributes are not detected as drift.
 func (r *rateLimitsPolicyResource) mapPolicyToState(state *rateLimitsPolicyResourceModel, policy *client.RateLimitsPolicy, preserveRequiresReplace bool) {
 	state.ID = types.StringValue(policy.ID)
 	state.Name = types.StringValue(policy.Name)
@@ -339,7 +359,7 @@ func (r *rateLimitsPolicyResource) mapPolicyToState(state *rateLimitsPolicyResou
 	if state.WorkspaceID.IsNull() || state.WorkspaceID.IsUnknown() {
 		state.WorkspaceID = types.StringValue(policy.WorkspaceID)
 	}
-	// Preserve type from state to avoid triggering RequiresReplace unnecessarily
+	// type still forces replacement: the API's update endpoint does not accept it
 	if !preserveRequiresReplace || state.Type.IsNull() || state.Type.IsUnknown() {
 		state.Type = types.StringValue(policy.Type)
 	}

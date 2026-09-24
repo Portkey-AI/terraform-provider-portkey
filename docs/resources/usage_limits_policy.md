@@ -17,7 +17,7 @@ Manages a Portkey usage limits policy. Controls total usage (cost or tokens) ove
 
 ### Required
 
-- `conditions` (String) JSON array of conditions that define which requests the policy applies to. Each condition has 'key', 'value' (string or array of strings), and an optional 'excludes' (string or array of strings).
+- `conditions` (String) JSON array of conditions that define which requests the policy applies to. Each condition has 'key', 'value' (string or array of strings), and an optional 'excludes' (string or array of strings). Updated in place; changing it does not reset the policy's accumulated usage.
 - `credit_limit` (Number) Maximum usage allowed.
 - `group_by` (String) JSON array of group by fields that define how usage is aggregated. Each item has 'key'.
 - `type` (String) Policy type: 'cost' or 'tokens'.

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Data sources no longer rewrite the `id` you configured** — `portkey_workspace`, `portkey_mcp_integration`, `portkey_prompt_collection`, `portkey_rate_limits_policy`, and `portkey_usage_limits_policy` each declare `id` as a **Required** argument and then overwrote it in `Read` with the identifier the API returned. Terraform requires a data source to return a Required argument exactly as configured, so this was a contract violation on every read. It was visible on the three endpoints that accept a slug as well as a UUID — `GET /admin/workspaces/{id}`, `GET /mcp-integrations/{id}`, and `GET /collections/{id}` all take either form but always echo the UUID — so a slug-configured lookup came back as a UUID. When the read happened at plan time the result was `Provider produced inconsistent result for data source`; when it was deferred to apply (because the data source depended on a resource being created or changed in the same run) Terraform kept the configured slug in the plan, read the UUID at apply, and then rejected the *downstream* resources with `Provider produced inconsistent final plan … produced an invalid new value for .conditions: was cty.StringVal("ws-…"), but now cty.StringVal("c4c3…")`. The two policy data sources carry no slug field, so their endpoints only ever take a UUID and echo it back; the assignment was a no-op there and is removed for contract correctness rather than to fix an observed failure. **Behaviour change:** a configuration that looks one of these up by slug and relies on `data.<type>.<name>.id` yielding the UUID will now get the slug back. Read the canonical slug from the computed `slug` attribute on `portkey_mcp_integration` and `portkey_prompt_collection`; `portkey_workspace` exposes no separate identifier attribute, so look it up by UUID if you need the UUID.
+
 ## [0.3.0] - 2026-08-28
 
 ### Fixed

@@ -48,10 +48,10 @@ func (d *promptCollectionDataSource) Metadata(_ context.Context, req datasource.
 // Schema defines the schema for the data source.
 func (d *promptCollectionDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Fetches a specific Portkey prompt collection by ID.",
+		Description: "Fetches a specific Portkey prompt collection by ID or slug.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Collection identifier (UUID).",
+				Description: "Collection identifier. Accepts either the collection UUID or its slug; whichever form is configured is returned unchanged.",
 				Required:    true,
 			},
 			"name": schema.StringAttribute{

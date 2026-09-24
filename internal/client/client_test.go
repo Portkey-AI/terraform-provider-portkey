@@ -427,3 +427,125 @@ func TestDeleteIntegrationModels_QueryParamShape(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateUsageLimitsPolicyRequestJSON pins the tri-state encoding of the usage
+// limits update body. The Portkey API treats an omitted field as "leave unchanged" and
+// an explicit null as "clear", so these three shapes are not interchangeable and a
+// stray omitempty would silently change the meaning of an update.
+func TestUpdateUsageLimitsPolicyRequestJSON(t *testing.T) {
+	threshold := 800.0
+	limit := 1000.0
+	conds := []PolicyCondition{
+		{Key: "metadata._user", Value: json.RawMessage(`["aqua-agent-bot"]`)},
+	}
+	condsJSON := `"conditions":[{"key":"metadata._user","value":["aqua-agent-bot"]}]`
+
+	tests := []struct {
+		name string
+		req  UpdateUsageLimitsPolicyRequest
+		want string
+	}{
+		{
+			name: "conditions always sent, alert_threshold cleared, reset fields omitted",
+			req: UpdateUsageLimitsPolicyRequest{
+				Conditions:  conds,
+				CreditLimit: &limit,
+			},
+			want: `{` + condsJSON + `,"credit_limit":1000,"alert_threshold":null}`,
+		},
+		{
+			name: "alert_threshold set",
+			req: UpdateUsageLimitsPolicyRequest{
+				Conditions:     conds,
+				CreditLimit:    &limit,
+				AlertThreshold: &threshold,
+			},
+			want: `{` + condsJSON + `,"credit_limit":1000,"alert_threshold":800}`,
+		},
+		{
+			name: "periodic_reset set clears periodic_reset_days",
+			req: UpdateUsageLimitsPolicyRequest{
+				Conditions:        conds,
+				AlertThreshold:    &threshold,
+				PeriodicReset:     json.RawMessage(`"monthly"`),
+				PeriodicResetDays: json.RawMessage(`null`),
+			},
+			want: `{` + condsJSON + `,"alert_threshold":800,"periodic_reset":"monthly","periodic_reset_days":null}`,
+		},
+		{
+			name: "periodic_reset_days set clears periodic_reset",
+			req: UpdateUsageLimitsPolicyRequest{
+				Conditions:        conds,
+				AlertThreshold:    &threshold,
+				PeriodicReset:     json.RawMessage(`null`),
+				PeriodicResetDays: json.RawMessage(`30`),
+			},
+			want: `{` + condsJSON + `,"alert_threshold":800,"periodic_reset":null,"periodic_reset_days":30}`,
+		},
+		{
+			name: "name omitted when empty rather than sent as null",
+			req:  UpdateUsageLimitsPolicyRequest{Conditions: conds, AlertThreshold: &threshold},
+			want: `{` + condsJSON + `,"alert_threshold":800}`,
+		},
+		{
+			// An empty array must reach the wire so the API can reject it. Dropping it
+			// would leave the server's old targeting live while state recorded [].
+			name: "empty conditions are sent, not dropped",
+			req: UpdateUsageLimitsPolicyRequest{
+				Conditions:     []PolicyCondition{},
+				AlertThreshold: &threshold,
+			},
+			want: `{"conditions":[],"alert_threshold":800}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := json.Marshal(tt.req)
+			if err != nil {
+				t.Fatalf("unexpected error marshaling request: %v", err)
+			}
+			if string(encoded) != tt.want {
+				t.Errorf("unexpected body\n got: %s\nwant: %s", encoded, tt.want)
+			}
+		})
+	}
+}
+
+// TestUpdateRateLimitsPolicyRequestJSON verifies conditions reach the rate limits
+// update body; before this was added the field did not exist on the struct, so a
+// conditions change could never be applied in place.
+func TestUpdateRateLimitsPolicyRequestJSON(t *testing.T) {
+	value := 100.0
+	req := UpdateRateLimitsPolicyRequest{
+		Conditions: []PolicyCondition{
+			{Key: "metadata._user", Value: json.RawMessage(`"aqua-agent-bot"`)},
+		},
+		Unit:  "rpm",
+		Value: &value,
+	}
+
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("unexpected error marshaling request: %v", err)
+	}
+
+	want := `{"conditions":[{"key":"metadata._user","value":"aqua-agent-bot"}],"unit":"rpm","value":100}`
+	if string(encoded) != want {
+		t.Errorf("unexpected body\n got: %s\nwant: %s", encoded, want)
+	}
+
+	// An empty array must reach the wire so the API can reject it, rather than being
+	// dropped and leaving the server's old targeting in place.
+	encoded, err = json.Marshal(UpdateRateLimitsPolicyRequest{
+		Conditions: []PolicyCondition{},
+		Unit:       "rpm",
+		Value:      &value,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error marshaling request: %v", err)
+	}
+	if want := `{"conditions":[],"unit":"rpm","value":100}`; string(encoded) != want {
+		t.Errorf("unexpected body for empty conditions\n got: %s\nwant: %s", encoded, want)
+	}
+}

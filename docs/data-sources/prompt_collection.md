@@ -13,9 +13,15 @@ Use this data source to get information about a Portkey prompt collection.
 ## Example Usage
 
 ```terraform
-# Look up a collection by ID
+# Look up a collection by UUID
 data "portkey_prompt_collection" "example" {
   id = "collection-uuid-here"
+}
+
+# ...or by slug. Either form is accepted, and `id` is returned exactly as
+# configured, so referencing this data source's `id` gives back the slug.
+data "portkey_prompt_collection" "by_slug" {
+  id = "co-first-a92b71"
 }
 
 # Use the collection data
@@ -33,7 +39,7 @@ output "collection_slug" {
 
 ### Required
 
-- `id` (String) The ID of the collection to look up.
+- `id` (String) Collection identifier. Accepts either the collection UUID or its slug; whichever form is configured is returned unchanged.
 
 ### Read-Only
 

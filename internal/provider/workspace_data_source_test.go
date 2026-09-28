@@ -22,6 +22,15 @@ func TestAccWorkspaceDataSource_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("data.portkey_workspace.test", "name", rName),
 					resource.TestCheckResourceAttr("data.portkey_workspace.test", "description", "Test description"),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "id"),
+					// "id" is a Required argument: the data source must echo the
+					// configured value back unchanged. Here that value is whatever
+					// portkey_workspace.test.id holds; see
+					// TestAccWorkspaceDataSource_slugPreserved for the slug form,
+					// which is the case the API actually rewrites.
+					resource.TestCheckResourceAttrPair(
+						"data.portkey_workspace.test", "id",
+						"portkey_workspace.test", "id",
+					),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "created_at"),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "updated_at"),
 				),
@@ -131,4 +140,40 @@ data "portkey_workspace" "test" {
   id = portkey_workspace.test.id
 }
 `, name)
+}
+
+// TestAccWorkspaceDataSource_slugPreserved tests that "id" is returned exactly
+// as configured when the workspace is looked up by slug. GET /admin/workspaces/{id}
+// accepts a slug but echoes the UUID, so assigning the API value to state.ID made
+// the attribute change between plan and apply and invalidated the plan of every
+// resource interpolating it.
+func TestAccWorkspaceDataSource_slugPreserved(t *testing.T) {
+	workspaceSlug := getTestWorkspaceSlug()
+	if workspaceSlug == "" {
+		t.Skip("TEST_WORKSPACE_SLUG must be set to test slug preservation")
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccWorkspaceDataSourceSlugConfig(workspaceSlug),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.portkey_workspace.by_slug", "id", workspaceSlug),
+					resource.TestCheckResourceAttrSet("data.portkey_workspace.by_slug", "name"),
+				),
+			},
+		},
+	})
+}
+
+func testAccWorkspaceDataSourceSlugConfig(slug string) string {
+	return fmt.Sprintf(`
+provider "portkey" {}
+
+data "portkey_workspace" "by_slug" {
+  id = %[1]q
+}
+`, slug)
 }

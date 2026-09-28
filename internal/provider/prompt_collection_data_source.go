@@ -48,10 +48,10 @@ func (d *promptCollectionDataSource) Metadata(_ context.Context, req datasource.
 // Schema defines the schema for the data source.
 func (d *promptCollectionDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Fetches a specific Portkey prompt collection by ID.",
+		Description: "Fetches a specific Portkey prompt collection by ID or slug.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Collection identifier (UUID).",
+				Description: "Collection identifier. Accepts either the collection UUID or its slug; whichever form is configured is returned unchanged.",
 				Required:    true,
 			},
 			"name": schema.StringAttribute{
@@ -130,7 +130,10 @@ func (d *promptCollectionDataSource) Read(ctx context.Context, req datasource.Re
 	}
 
 	// Map response to state
-	state.ID = types.StringValue(collection.ID)
+	// "id" is a Required argument, so it must be returned exactly as configured.
+	// Terraform rejects a data source whose result differs from its config, and
+	// when the read is deferred to apply the mismatch also invalidates the plan
+	// of every resource that interpolated this value.
 	state.Name = types.StringValue(collection.Name)
 	state.WorkspaceID = types.StringValue(collection.WorkspaceID)
 	state.Slug = types.StringValue(collection.Slug)

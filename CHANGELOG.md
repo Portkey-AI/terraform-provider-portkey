@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`403 AB03` is no longer treated as a missing resource** — `client.IsNotFound` matched both `404` and `403`, so every `Read` that used it (`portkey_workspace`, `portkey_workspace_defaults`, `portkey_workspace_member`, `portkey_api_key`) silently removed the resource from state on any `403`. That was a workaround for the Admin API returning `403 AB03 You do not have enough permissions to execute this request` on zero-row GET lookups. [Portkey-AI/albus#2660](https://github.com/Portkey-AI/albus/pull/2660) fixed this at the source — `GET /admin/workspaces/{id}`, `GET /admin/workspaces/{id}/users/{userId}`, and `GET /api-keys/{id}` now return `404 AB08 NOT_FOUND` when the resource does not exist — so the workaround is redundant and `IsNotFound` matches `404` only. This supersedes the "Departed-user 403s no longer wedge `plan`/`apply`" fix in v0.2.31; `IsNotFound` remains wired into all four resources, only the `403` fallback is gone. The upside is that a genuine authorization failure — an Admin API key missing a required scope, or a workspace the key cannot access — now surfaces as a diagnostic instead of being misread as a deletion. Previously such a key made Terraform drop live resources from state and plan a recreate, which on apply could mean a duplicate workspace or a rotated API key.
+- **Requires a control plane including albus [#2660](https://github.com/Portkey-AI/albus/pull/2660)** (merged 2026-09-16). Portkey-hosted control planes are already on it, so no action is needed. Self-hosted and air-gapped deployments run pinned albus images via the `portkey-app` Helm chart and may still answer `403` for a resource that does not exist; against those, an out-of-band deletion makes `plan`/`apply` fail instead of reconciling. Upgrade the control plane before taking this release, or stay on `v0.4.0` until you can.
+
 ## [0.4.0] - 2026-09-28
 
 ### Fixed

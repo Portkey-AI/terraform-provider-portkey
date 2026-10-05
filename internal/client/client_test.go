@@ -246,7 +246,7 @@ func TestDoRequest_RetriesOn429(t *testing.T) {
 func TestDoRequest_ReturnsAPIErrorOn4xx(t *testing.T) {
 	// Non-retryable 4xx responses should return a *APIError carrying the
 	// status code and raw body so callers can apply per-status handling
-	// (e.g. treating 403 on Read as missing-resource for state
+	// (e.g. treating 404 on Read as missing-resource for state
 	// reconciliation). The error message must preserve the legacy string
 	// format so existing callers that match against
 	// "API request failed with status N" keep working.
@@ -276,10 +276,11 @@ func TestDoRequest_ReturnsAPIErrorOn4xx(t *testing.T) {
 }
 
 func TestIsNotFound(t *testing.T) {
-	// IsNotFound encapsulates Portkey's quirk: out-of-band-deleted
-	// resources return 403 (errorCode AB03) for some endpoints and 404
-	// for others. Both should be treated as missing-resource by Read
-	// implementations so Terraform can reconcile state.
+	// The Admin API signals a missing resource with 404 (errorCode AB08).
+	// A 403 (AB03) is a genuine authorization failure — a missing scope on
+	// the Admin API key, or workspace access denied — and must NOT be
+	// treated as missing-resource, otherwise a live resource is silently
+	// dropped from state and planned for recreation.
 	cases := []struct {
 		name string
 		err  error
@@ -288,7 +289,9 @@ func TestIsNotFound(t *testing.T) {
 		{"nil error is not not-found", nil, false},
 		{"plain error is not not-found", errors.New("network down"), false},
 		{"404 is not-found", &APIError{StatusCode: http.StatusNotFound, Body: ""}, true},
-		{"403 is not-found", &APIError{StatusCode: http.StatusForbidden, Body: `{"errorCode":"AB03"}`}, true},
+		{"404 AB08 is not-found", &APIError{StatusCode: http.StatusNotFound, Body: `{"errorCode":"AB08"}`}, true},
+		{"403 is a real permission error", &APIError{StatusCode: http.StatusForbidden, Body: ""}, false},
+		{"403 AB03 is a real permission error", &APIError{StatusCode: http.StatusForbidden, Body: `{"errorCode":"AB03"}`}, false},
 		{"500 is not not-found", &APIError{StatusCode: http.StatusInternalServerError, Body: ""}, false},
 		{"400 is not not-found", &APIError{StatusCode: http.StatusBadRequest, Body: `{"errorCode":"AB01"}`}, false},
 		{"wrapped 404 unwraps via errors.As", fmt.Errorf("read failed: %w", &APIError{StatusCode: http.StatusNotFound}), true},

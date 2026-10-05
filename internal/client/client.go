@@ -120,7 +120,7 @@ func NewClientWithConfig(cfg ClientConfig) (*Client, error) {
 
 // APIError represents a non-2xx response from the Portkey Admin API. Callers
 // can use errors.As to inspect the StatusCode and apply per-status handling
-// (e.g. treating 403/404 on a Read as missing-resource for state
+// (e.g. treating 404 on a Read as missing-resource for state
 // reconciliation).
 //
 // Body is the raw response body so callers can extract Portkey's structured
@@ -136,17 +136,20 @@ func (e *APIError) Error() string {
 }
 
 // IsNotFound reports whether the error indicates a missing resource as
-// signalled by the Portkey API. Portkey returns 404 for some endpoints and
-// 403 (errorCode AB03) for others when a referenced resource has been
-// deleted out-of-band — both should be treated as missing-resource by
-// resource Read implementations so Terraform can reconcile state.
+// signalled by the Portkey API. The Admin API returns 404 (errorCode AB08)
+// when a resource does not exist or was deleted out-of-band, so resource
+// Read implementations can reconcile state against it.
+//
+// A 403 (errorCode AB03) is deliberately NOT treated as missing: it means
+// the calling Admin API key lacks the required scope, or access to the
+// workspace is denied. Swallowing it would silently drop a live resource
+// from state and plan a recreate, so it must surface as a diagnostic.
 func IsNotFound(err error) bool {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		return false
 	}
-	return apiErr.StatusCode == http.StatusNotFound ||
-		apiErr.StatusCode == http.StatusForbidden
+	return apiErr.StatusCode == http.StatusNotFound
 }
 
 // doRequest performs an HTTP request

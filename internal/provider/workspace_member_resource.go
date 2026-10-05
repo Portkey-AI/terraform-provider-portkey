@@ -156,9 +156,8 @@ func (r *workspaceMemberResource) Read(ctx context.Context, req resource.ReadReq
 	// Get refreshed member value from Portkey using user_id
 	member, err := r.client.GetWorkspaceMember(ctx, state.WorkspaceID.ValueString(), state.UserID.ValueString())
 	if err != nil {
-		// Portkey returns 404 (AB08) for memberships removed out-of-band and
-		// 403 (AB03) when the user has been removed from the organisation.
-		// Both mean the membership no longer exists.
+		// Portkey returns 404 (AB08) for memberships removed out-of-band,
+		// meaning the membership no longer exists.
 		if client.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
 			return

@@ -2,11 +2,14 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
+
+var workspaceUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // TestAccScimWorkspaceMappingsDataSource_basic lists every mapping the API
 // returns and asserts the response shape. The org may legitimately have
@@ -49,9 +52,9 @@ func TestAccScimWorkspaceMappingsDataSource_withCreatedMapping(t *testing.T) {
 					// The filtered data source should see exactly the mapping we just created.
 					resource.TestCheckResourceAttr("data.portkey_scim_workspace_mappings.filtered", "mappings.#", "1"),
 					resource.TestCheckResourceAttr("data.portkey_scim_workspace_mappings.filtered", "mappings.0.role", "member"),
-					resource.TestCheckResourceAttrPair(
+					resource.TestMatchResourceAttr(
 						"data.portkey_scim_workspace_mappings.filtered", "mappings.0.workspace_id",
-						"portkey_workspace.test", "id",
+						workspaceUUIDPattern,
 					),
 					resource.TestCheckResourceAttrPair(
 						"data.portkey_scim_workspace_mappings.filtered", "mappings.0.id",

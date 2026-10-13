@@ -191,10 +191,12 @@ func (r *workspaceDefaultsResource) Read(ctx context.Context, req resource.ReadR
 
 	workspace, err := r.client.GetWorkspace(ctx, state.ID.ValueString())
 	if err != nil {
-		if client.IsNotFound(err) {
-			// Parent workspace is gone. Removing this resource from state
-			// lets terraform apply reconcile (either re-plan or accept the
-			// deletion), mirroring workspace_resource.go Read.
+		if client.IsWorkspaceGone(err) {
+			// Parent workspace is gone (404, or 403 for an archived
+			// workspace — see client.IsWorkspaceGone). Removing this
+			// resource from state lets terraform apply reconcile (either
+			// re-plan or accept the deletion), mirroring
+			// workspace_resource.go Read.
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -308,7 +310,10 @@ func (r *workspaceDefaultsResource) Delete(ctx context.Context, req resource.Del
 		},
 	}
 	if _, err := r.client.UpdateWorkspace(ctx, state.ID.ValueString(), updateReq); err != nil {
-		if client.IsNotFound(err) {
+		// Nothing to clear if the parent workspace is already gone (404,
+		// or 403 for an archived workspace — see client.IsWorkspaceGone),
+		// so let the destroy succeed.
+		if client.IsWorkspaceGone(err) {
 			return
 		}
 		resp.Diagnostics.AddError(

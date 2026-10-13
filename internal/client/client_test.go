@@ -281,6 +281,10 @@ func TestIsNotFound(t *testing.T) {
 	// the Admin API key, or workspace access denied — and must NOT be
 	// treated as missing-resource, otherwise a live resource is silently
 	// dropped from state and planned for recreation.
+	//
+	// Workspace-scoped reads cannot use this helper, because an archived
+	// workspace is rejected by authorize() as a 403 before the controller
+	// can answer 404; those use IsWorkspaceGone.
 	cases := []struct {
 		name string
 		err  error
@@ -300,6 +304,36 @@ func TestIsNotFound(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := IsNotFound(tc.err); got != tc.want {
 				t.Errorf("IsNotFound(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsWorkspaceGone(t *testing.T) {
+	// Deleting a workspace archives it, and authorize() drops archived
+	// workspaces from the caller's permitted set before the controller
+	// runs, so the Admin API answers 403 AB03 for a deleted workspace
+	// instead of 404. Workspace-scoped reads must accept both, or an
+	// out-of-band deletion wedges plan/apply. Other statuses must still
+	// surface as errors.
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error is not gone", nil, false},
+		{"plain error is not gone", errors.New("network down"), false},
+		{"404 AB08 is gone", &APIError{StatusCode: http.StatusNotFound, Body: `{"errorCode":"AB08"}`}, true},
+		{"403 AB03 is gone (archived workspace)", &APIError{StatusCode: http.StatusForbidden, Body: `{"errorCode":"AB03"}`}, true},
+		{"500 is not gone", &APIError{StatusCode: http.StatusInternalServerError, Body: ""}, false},
+		{"400 AB01 is not gone", &APIError{StatusCode: http.StatusBadRequest, Body: `{"errorCode":"AB01"}`}, false},
+		{"401 is not gone", &APIError{StatusCode: http.StatusUnauthorized, Body: ""}, false},
+		{"wrapped 403 unwraps via errors.As", fmt.Errorf("read failed: %w", &APIError{StatusCode: http.StatusForbidden}), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsWorkspaceGone(tc.err); got != tc.want {
+				t.Errorf("IsWorkspaceGone(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}

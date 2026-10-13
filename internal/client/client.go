@@ -144,12 +144,48 @@ func (e *APIError) Error() string {
 // the calling Admin API key lacks the required scope, or access to the
 // workspace is denied. Swallowing it would silently drop a live resource
 // from state and plan a recreate, so it must surface as a diagnostic.
+//
+// Endpoints whose 404 is produced upstream of the controller — e.g.
+// GET /api-keys/{id}, where the request hydrator answers NOT_FOUND for an
+// unknown id before authorisation runs — can use this directly. Endpoints
+// scoped to a workspace that may itself be archived must use
+// IsWorkspaceGone instead; see its doc comment.
 func IsNotFound(err error) bool {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		return false
 	}
 	return apiErr.StatusCode == http.StatusNotFound
+}
+
+// IsWorkspaceGone reports whether the error means the addressed workspace
+// no longer exists, accepting either 404 or 403.
+//
+// Deleting a workspace archives it (status 'archived') rather than removing
+// the row. On workspace-scoped admin routes the authorize() middleware runs
+// before the controller and, with allowArchivedWorkspaces defaulting to
+// false, builds the caller's permitted workspace set from active workspaces
+// only. An archived workspace is absent from that set, so the middleware
+// answers 403 AB03 and the controller — which would have answered 404 — is
+// never reached. This is independent of the controller-level 404 work in
+// Portkey-AI/albus#2660 and applies to the hosted control plane too.
+//
+// The cost of accepting 403 here is that a genuine permission failure on
+// these reads is still indistinguishable from a deletion. That is the
+// lesser evil: treating a deleted workspace as a hard error wedges
+// plan/apply with no recovery short of `terraform state rm`, whereas the
+// permission case merely removes the resource from state and re-plans it.
+//
+// TODO: narrow this to IsNotFound once albus sets
+// allowArchivedWorkspaces: true on the workspace and workspace-member GET
+// routes, letting the controller's 404 surface.
+func IsWorkspaceGone(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusNotFound ||
+		apiErr.StatusCode == http.StatusForbidden
 }
 
 // doRequest performs an HTTP request

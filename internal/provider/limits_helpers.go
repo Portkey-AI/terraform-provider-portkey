@@ -339,7 +339,7 @@ func guardrailsFromAPIToList(entries []string) (types.List, diag.Diagnostics) {
 }
 
 // organisationGuardrailRefsToList converts the {id, slug} objects returned
-// by GET /v2/admin/organisation/defaults into a flat Terraform string list.
+// by GET /admin/organisation/defaults into a flat Terraform string list.
 // Slugs are preferred (they are what users reference via
 // portkey_guardrail.foo.slug), falling back to the UUID when the API omits
 // the slug. Returns a null list when the input is empty so organisations

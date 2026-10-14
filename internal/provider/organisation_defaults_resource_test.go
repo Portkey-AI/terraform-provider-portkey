@@ -250,7 +250,7 @@ resource "portkey_organisation_defaults" "test" {}
 // guardrail is used as an organisation default.
 //
 // Gated like the other organisation tests even though it only asserts a
-// rejection: it still issues a mutating PUT /v2/admin/organisation/defaults,
+// rejection: it still issues a mutating PUT /admin/organisation/defaults,
 // and a key without organisation_settings.update gets a 403 AB03 that does not
 // match the expected pattern — failing the test rather than skipping it.
 func TestAccOrganisationDefaultsResource_rejectsWorkspaceGuardrail(t *testing.T) {

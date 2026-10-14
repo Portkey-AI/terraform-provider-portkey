@@ -9,47 +9,6 @@ import (
 	"testing"
 )
 
-// TestOrganisationDefaultsURL verifies that the organisation defaults endpoint
-// swaps the configured BaseURL's /v1 suffix for /v2, since these endpoints live
-// under /v2 while the rest of the Admin API used by this provider is on /v1.
-func TestOrganisationDefaultsURL(t *testing.T) {
-	cases := []struct {
-		name    string
-		baseURL string
-		want    string
-	}{
-		{
-			name:    "default v1 base url",
-			baseURL: "https://api.portkey.ai/v1",
-			want:    "https://api.portkey.ai/v2/admin/organisation/defaults",
-		},
-		{
-			name:    "default v1 base url with trailing slash",
-			baseURL: "https://api.portkey.ai/v1/",
-			want:    "https://api.portkey.ai/v2/admin/organisation/defaults",
-		},
-		{
-			name:    "self-hosted base url with path prefix",
-			baseURL: "https://portkey.internal.example.com/api/v1",
-			want:    "https://portkey.internal.example.com/api/v2/admin/organisation/defaults",
-		},
-		{
-			name:    "base url without version suffix",
-			baseURL: "https://portkey.internal.example.com",
-			want:    "https://portkey.internal.example.com/v2/admin/organisation/defaults",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := &Client{BaseURL: tc.baseURL}
-			if got := c.organisationDefaultsURL(); got != tc.want {
-				t.Errorf("organisationDefaultsURL() = %q; want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // TestGetOrganisationDefaults_OK verifies the {id, slug} read shape is parsed.
 func TestGetOrganisationDefaults_OK(t *testing.T) {
 	var capturedMethod, capturedPath string
@@ -78,8 +37,8 @@ func TestGetOrganisationDefaults_OK(t *testing.T) {
 	if capturedMethod != http.MethodGet {
 		t.Errorf("method = %q; want GET", capturedMethod)
 	}
-	if capturedPath != "/v2/admin/organisation/defaults" {
-		t.Errorf("path = %q; want /v2/admin/organisation/defaults", capturedPath)
+	if capturedPath != "/v1/admin/organisation/defaults" {
+		t.Errorf("path = %q; want /v1/admin/organisation/defaults", capturedPath)
 	}
 	if defaults.Object != "organisation_defaults" {
 		t.Errorf("object = %q; want organisation_defaults", defaults.Object)
@@ -89,6 +48,58 @@ func TestGetOrganisationDefaults_OK(t *testing.T) {
 	}
 	if len(defaults.OutputGuardrails) != 1 || defaults.OutputGuardrails[0].ID != "22222222-2222-2222-2222-222222222222" {
 		t.Errorf("unexpected output_guardrails: %+v", defaults.OutputGuardrails)
+	}
+}
+
+// TestGetOrganisationDefaults_SelfHostedBaseURL verifies that the relative path
+// composition works for self-hosted base_url shapes (with path prefix, without
+// trailing /v1, etc.) — coverage that the deleted organisationDefaultsURL helper
+// used to provide for these variants.
+func TestGetOrganisationDefaults_SelfHostedBaseURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		baseURL    func(srvURL string) string
+		wantPath   string
+	}{
+		{
+			name:     "self-hosted with path prefix",
+			baseURL:  func(u string) string { return u + "/api/v1" },
+			wantPath: "/api/v1/admin/organisation/defaults",
+		},
+		{
+			name:     "default v1 base url",
+			baseURL:  func(u string) string { return u + "/v1" },
+			wantPath: "/v1/admin/organisation/defaults",
+		},
+		{
+			name:     "base url without version suffix",
+			baseURL:  func(u string) string { return u },
+			wantPath: "/admin/organisation/defaults",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedPath = r.URL.Path
+				_, _ = w.Write([]byte(`{"object":"organisation_defaults","input_guardrails":[],"output_guardrails":[]}`))
+			}))
+			defer srv.Close()
+
+			c, err := NewClient(tc.baseURL(srv.URL), "test-key")
+			if err != nil {
+				t.Fatalf("NewClient failed: %v", err)
+			}
+
+			if _, err := c.GetOrganisationDefaults(context.Background()); err != nil {
+				t.Fatalf("GetOrganisationDefaults failed: %v", err)
+			}
+
+			if capturedPath != tc.wantPath {
+				t.Errorf("path = %q; want %q", capturedPath, tc.wantPath)
+			}
+		})
 	}
 }
 

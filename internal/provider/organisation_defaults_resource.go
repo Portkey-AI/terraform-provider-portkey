@@ -17,7 +17,7 @@ import (
 )
 
 // organisationDefaultsSingletonID is the fixed state ID for
-// portkey_organisation_defaults. GET/PUT /v2/admin/organisation/defaults are
+// portkey_organisation_defaults. GET/PUT /admin/organisation/defaults are
 // scoped implicitly to the organisation owning the configured Admin API key,
 // so there is no organisation identifier to key the resource on.
 const organisationDefaultsSingletonID = "organisation_defaults"
@@ -106,7 +106,7 @@ func (r *organisationDefaultsResource) Schema(_ context.Context, _ resource.Sche
 }
 
 // ConfigValidators mirrors the API's requirement that PUT
-// /v2/admin/organisation/defaults carry at least one of input_guardrails or
+// /admin/organisation/defaults carry at least one of input_guardrails or
 // output_guardrails, surfacing it at plan time instead of as a 400 on apply.
 func (r *organisationDefaultsResource) ConfigValidators(_ context.Context) []resource.ConfigValidator {
 	return []resource.ConfigValidator{

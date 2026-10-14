@@ -21,7 +21,7 @@
 |----------|:------:|:----:|:------:|:------:|:------:|------------|-------------|
 | `portkey_workspace` | ✅ | ✅ | ✅ | ✅ | ✅ | Delete requires `{ "name": "..." }` in the body. Provider-side `force_delete` (default `false`) opts in to dependent-resource cleanup before delete; `terraform import` seeds `force_delete = false` in state so imported workspaces destroy consistently | ✅ 18 tests, including cascade-delete and import/destroy coverage |
 | `portkey_workspace_defaults` | ✅ | ✅ | ✅ | ⚠️ | ✅ | Default input/output guardrails live on the workspace; written via PUT `/admin/workspaces/{id}` `defaults`. Both lists are `Optional+Computed`: an omitted field is never sent (existing guardrails preserved and adopted into state), `[]` clears. No reset endpoint — Delete clears both lists | ✅ Unit + acc tests |
-| `portkey_organisation_defaults` | ✅ | ✅ | ✅ | ⚠️ | ✅ | Default input/output guardrails for the whole organisation, via `GET`/`PUT /v2/admin/organisation/defaults` (note: `/v2`, not `/v1`). Singleton — the organisation comes from the Admin API key, so there is no `organisation_id` and the import ID is ignored. Requires at least one of the two lists (enforced at plan time); only org-scoped guardrails accepted. Both lists are `Optional+Computed`: an omitted field is never sent (existing guardrails preserved and adopted into state), `[]` clears. No reset endpoint — Delete clears both lists. Lifecycle acc test is env-gated behind `PORTKEY_TEST_ORG_DEFAULTS` because it overwrites shared org state | ✅ Unit (client + helpers) + acc tests |
+| `portkey_organisation_defaults` | ✅ | ✅ | ✅ | ⚠️ | ✅ | Default input/output guardrails for the whole organisation, via `GET`/`PUT /admin/organisation/defaults`. Singleton — the organisation comes from the Admin API key, so there is no `organisation_id` and the import ID is ignored. Requires at least one of the two lists (enforced at plan time); only org-scoped guardrails accepted. Both lists are `Optional+Computed`: an omitted field is never sent (existing guardrails preserved and adopted into state), `[]` clears. No reset endpoint — Delete clears both lists. Lifecycle acc test is env-gated behind `PORTKEY_TEST_ORG_DEFAULTS` because it overwrites shared org state | ✅ Unit (client + helpers) + acc tests |
 | `portkey_workspace_member` | ✅ | ⚠️ | ✅ | ✅ | ✅ | getMember API has issues | Skipped |
 | `portkey_workspace_security_settings` | ✅ | ✅ | ✅ | ⚠️ | ✅ | API requires full 35-field object on PUT (sparse rejected as 400 AB01); Delete removes state only, no API reset endpoint exists | ✅ 2 acc tests (basic + partial-preserves-others) |
 | `portkey_user_invite` | ✅ | ✅ | ❌ | ✅ | ✅ | Update API doesn't exist | ✅ Passing |
@@ -118,16 +118,16 @@ DELETE /admin/workspaces/{id}      → Delete (requires {"name": "..."} in body)
 
 ### Organisation Defaults
 ```
-GET    /v2/admin/organisation/defaults  → Read  (returns input_guardrails /
+GET    /admin/organisation/defaults     → Read  (returns input_guardrails /
                                                  output_guardrails as
                                                  {id, slug} objects)
-PUT    /v2/admin/organisation/defaults  → Update (body takes plain string
+PUT    /admin/organisation/defaults     → Update (body takes plain string
                                                  arrays of IDs and/or slugs;
                                                  returns {})
 ```
 
 **Notes:**
-- These are the only endpoints this provider uses under `/v2` — the configured `base_url` ends with `/v1`, so the client swaps the version suffix (`organisationDefaultsURL`).
+- The Admin API serves these under `/v2` upstream; auth-worker remaps `/v1/admin/organisation/defaults` → `/v2/admin/organisation/defaults` on the way through, so the provider addresses them like every other admin endpoint (relative to a `/v1` `base_url`).
 - No organisation identifier is sent or returned; the organisation is derived from the Admin API key, which must hold `organisation_settings.read` / `organisation_settings.update`.
 - `PUT` requires at least one of `input_guardrails` / `output_guardrails`. A field that is present replaces that list (`[]` clears it); an omitted field is preserved.
 - Workspace-scoped guardrails are rejected with `Workspace-scoped guardrails cannot be set as organisation defaults`.

@@ -9,7 +9,7 @@ description: |-
 
 Manages organisation-level default input/output guardrails for Portkey. Every request routed through the organisation's API keys will pass through the configured guardrails in order, unless a workspace overrides them via `portkey_workspace_defaults`.
 
-The Portkey Admin API scopes these defaults to the organisation that owns the configured Admin API key (`GET`/`PUT /v2/admin/organisation/defaults`), so there is no `organisation_id` argument. Exactly one `portkey_organisation_defaults` may exist per provider configuration — declaring two blocks is a config bug, and the last apply wins.
+The Portkey Admin API scopes these defaults to the organisation that owns the configured Admin API key (`GET`/`PUT /admin/organisation/defaults`), so there is no `organisation_id` argument. Exactly one `portkey_organisation_defaults` may exist per provider configuration — declaring two blocks is a config bug, and the last apply wins.
 
 ## Example Usage
 

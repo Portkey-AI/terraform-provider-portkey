@@ -356,7 +356,7 @@ func applyDefaultsFromAPI(plan *workspaceDefaultsResourceModel, workspace *clien
 // preserveOmittedGuardrails fills in guardrail lists the user did not configure
 // with the workspace's current values.
 //
-// Unlike PUT /v2/admin/organisation/defaults, which preserves fields absent from
+// Unlike PUT /admin/organisation/defaults, which preserves fields absent from
 // the request body, the workspace endpoint replaces the whole `defaults` object:
 // a PUT carrying only input_guardrails clears output_guardrails. Sending the
 // current value back unchanged is therefore the only way to make an omitted

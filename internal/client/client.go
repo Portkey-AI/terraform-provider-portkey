@@ -1968,7 +1968,7 @@ func (c *Client) DeleteGuardrail(ctx context.Context, slugOrID string) error {
 }
 
 // OrganisationGuardrailRef is a guardrail reference as returned by
-// GET /v2/admin/organisation/defaults. Unlike workspace defaults, which
+// GET /admin/organisation/defaults. Unlike workspace defaults, which
 // return plain string arrays, the organisation endpoint enriches each
 // entry with both the guardrail UUID and its slug.
 type OrganisationGuardrailRef struct {
@@ -1977,7 +1977,7 @@ type OrganisationGuardrailRef struct {
 }
 
 // OrganisationDefaults represents the organisation-level default guardrails
-// returned by GET /v2/admin/organisation/defaults. The organisation is
+// returned by GET /admin/organisation/defaults. The organisation is
 // derived from the Admin API key used for the request, so there is no
 // organisation identifier in the request or the response.
 type OrganisationDefaults struct {
@@ -2000,20 +2000,10 @@ type UpdateOrganisationDefaultsRequest struct {
 	OutputGuardrails json.RawMessage `json:"output_guardrails,omitempty"`
 }
 
-// organisationDefaultsURL returns the absolute URL for the organisation
-// defaults endpoints. These live under /v2 while the rest of the Admin API
-// used by this provider lives under /v1, and the configured BaseURL is
-// expected to end with /v1 (the provider default and most self-hosted
-// setups), so the version suffix is swapped rather than appended.
-func (c *Client) organisationDefaultsURL() string {
-	base := strings.TrimSuffix(strings.TrimSuffix(c.BaseURL, "/"), "/v1")
-	return strings.TrimSuffix(base, "/") + "/v2/admin/organisation/defaults"
-}
-
 // GetOrganisationDefaults retrieves the organisation-level default
 // guardrails for the organisation owning the configured Admin API key.
 func (c *Client) GetOrganisationDefaults(ctx context.Context) (*OrganisationDefaults, error) {
-	respBody, err := c.doRequest(ctx, http.MethodGet, c.organisationDefaultsURL(), nil)
+	respBody, err := c.doRequest(ctx, http.MethodGet, "/admin/organisation/defaults", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2030,7 +2020,7 @@ func (c *Client) GetOrganisationDefaults(ctx context.Context) (*OrganisationDefa
 // guardrails. The API returns an empty object on success, so the current
 // state is re-fetched and returned.
 func (c *Client) UpdateOrganisationDefaults(ctx context.Context, req UpdateOrganisationDefaultsRequest) (*OrganisationDefaults, error) {
-	if _, err := c.doRequest(ctx, http.MethodPut, c.organisationDefaultsURL(), req); err != nil {
+	if _, err := c.doRequest(ctx, http.MethodPut, "/admin/organisation/defaults", req); err != nil {
 		return nil, err
 	}
 

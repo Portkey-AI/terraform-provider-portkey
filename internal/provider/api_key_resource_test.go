@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
@@ -1362,4 +1363,92 @@ resource "portkey_api_key" "test" {
   rotate_trigger = %[2]q
 %[3]s}
 `, name, trigger, transitionLine)
+}
+
+// TestAccAPIKeyResource_parentWorkspaceDeletedOutOfBand pins the wiring that
+// unit tests cannot: that a workspace-scoped key whose parent workspace is
+// deleted outside Terraform is reconciled rather than erroring.
+//
+// GET /api-keys/{id} answers 404 for an unknown or deleted key id, because
+// the request hydrator resolves the id before authorisation runs. But the
+// hydrator resolves a workspace-scoped key from its organisation alone, so
+// the key still hydrates after its parent workspace is archived; authorize()
+// then runs with the archived workspace_id and answers 403 AB03. A Read that
+// only accepted 404 hard-errored here, and `terraform state rm` was the only
+// way out — the wedge v0.2.31 removed.
+//
+// Deleting the workspace also archives its keys in the same transaction
+// (albus workspaces/models/workspaces.js archiveWorkspaceWithDependencies),
+// so this covers the realistic case rather than a contrived one. The refresh
+// step must leave a non-empty plan: both resources are gone from state and
+// Terraform plans to re-create them.
+func TestAccAPIKeyResource_parentWorkspaceDeletedOutOfBand(t *testing.T) {
+	rName := acctest.RandomWithPrefix("tf-acc-apikey-oob")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAPIKeyWorkspaceScopedConfig(rName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("portkey_api_key.scoped", "id"),
+					resource.TestCheckResourceAttrSet("portkey_api_key.scoped", "workspace_id"),
+					resource.TestCheckResourceAttr("portkey_api_key.scoped", "type", "workspace"),
+					deleteWorkspaceOutOfBand("portkey_workspace.parent"),
+				),
+			},
+			{
+				// Refresh only. Before the fix this failed with
+				// "API request failed with status 403"; now both resources
+				// drop out of state and are planned for re-creation.
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
+}
+
+// deleteWorkspaceOutOfBand deletes the workspace held by the given resource
+// address directly through the API, simulating a deletion in the Portkey
+// console. Terraform's state still carries the workspace and any keys inside
+// it, which is the drift the following step has to reconcile.
+func deleteWorkspaceOutOfBand(addr string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[addr]
+		if !ok {
+			return fmt.Errorf("resource %s not found in state", addr)
+		}
+
+		c, err := newTestClient()
+		if err != nil {
+			return fmt.Errorf("error creating test client: %s", err)
+		}
+
+		// The delete endpoint requires the workspace name in the body as a
+		// confirmation guard.
+		if err := c.DeleteWorkspace(context.Background(), rs.Primary.ID, rs.Primary.Attributes["name"]); err != nil {
+			return fmt.Errorf("failed to delete workspace %s out of band: %w", rs.Primary.ID, err)
+		}
+		return nil
+	}
+}
+
+func testAccAPIKeyWorkspaceScopedConfig(name string) string {
+	return fmt.Sprintf(`
+resource "portkey_workspace" "parent" {
+  name         = %[1]q
+  description  = "api_key out-of-band deletion test"
+  force_delete = true
+}
+
+resource "portkey_api_key" "scoped" {
+  name         = "%[1]s-key"
+  type         = "workspace"
+  sub_type     = "service"
+  workspace_id = portkey_workspace.parent.id
+
+  scopes = ["providers.list"]
+}
+`, name)
 }

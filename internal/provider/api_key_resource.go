@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
 
@@ -1043,9 +1044,30 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	// Get refreshed API key value from Portkey
 	apiKey, err := r.client.GetAPIKey(ctx, state.ID.ValueString())
 	if err != nil {
-		// Portkey returns 404 for deleted keys, meaning the key is gone
-		// from Terraform's perspective.
-		if client.IsNotFound(err) {
+		// An unknown or deleted key id answers 404: the request hydrator
+		// resolves the id before authorisation runs, so this is a true
+		// missing-resource signal and a 403 here is a real permission
+		// error (e.g. a missing *_api_keys.read scope).
+		//
+		// A workspace-scoped key is the exception. The hydrator resolves it
+		// from its organisation alone, so the key still hydrates after its
+		// parent workspace is archived; authorize() then runs with that
+		// archived workspace_id and answers 403 AB03. The key is
+		// unreachable for good, so tolerate 403 for workspace-scoped keys
+		// only — erroring would wedge plan/apply with no recovery short of
+		// `terraform state rm`. Org-level keys keep the strict check.
+		isWorkspaceScoped := !state.WorkspaceID.IsNull() && !state.WorkspaceID.IsUnknown()
+		if client.IsNotFound(err) || (isWorkspaceScoped && client.IsWorkspaceGone(err)) {
+			if client.IsForbidden(err) {
+				// Ambiguous: an archived parent workspace and an Admin key
+				// lacking scope on a live one are indistinguishable here.
+				// Log before dropping state, so a silent removal followed
+				// by a surprise recreate is at least traceable.
+				tflog.Warn(ctx, "API key read returned 403; treating as deleted because its parent workspace is unreachable. If the workspace still exists, check the Admin API key's scopes instead", map[string]interface{}{
+					"api_key_id":   state.ID.ValueString(),
+					"workspace_id": state.WorkspaceID.ValueString(),
+				})
+			}
 			resp.State.RemoveResource(ctx)
 			return
 		}

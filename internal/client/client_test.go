@@ -292,9 +292,7 @@ func TestIsNotFound(t *testing.T) {
 	}{
 		{"nil error is not not-found", nil, false},
 		{"plain error is not not-found", errors.New("network down"), false},
-		{"404 is not-found", &APIError{StatusCode: http.StatusNotFound, Body: ""}, true},
 		{"404 AB08 is not-found", &APIError{StatusCode: http.StatusNotFound, Body: `{"errorCode":"AB08"}`}, true},
-		{"403 is a real permission error", &APIError{StatusCode: http.StatusForbidden, Body: ""}, false},
 		{"403 AB03 is a real permission error", &APIError{StatusCode: http.StatusForbidden, Body: `{"errorCode":"AB03"}`}, false},
 		{"500 is not not-found", &APIError{StatusCode: http.StatusInternalServerError, Body: ""}, false},
 		{"400 is not not-found", &APIError{StatusCode: http.StatusBadRequest, Body: `{"errorCode":"AB01"}`}, false},
@@ -334,6 +332,32 @@ func TestIsWorkspaceGone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := IsWorkspaceGone(tc.err); got != tc.want {
 				t.Errorf("IsWorkspaceGone(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsForbidden(t *testing.T) {
+	// IsForbidden isolates the ambiguous half of IsWorkspaceGone so call
+	// sites can log before dropping a resource from state: on these routes
+	// a missing scope and an archived workspace are indistinguishable.
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error is not forbidden", nil, false},
+		{"plain error is not forbidden", errors.New("network down"), false},
+		{"403 AB03 is forbidden", &APIError{StatusCode: http.StatusForbidden, Body: `{"errorCode":"AB03"}`}, true},
+		{"404 is not forbidden", &APIError{StatusCode: http.StatusNotFound, Body: `{"errorCode":"AB08"}`}, false},
+		{"401 is not forbidden", &APIError{StatusCode: http.StatusUnauthorized, Body: ""}, false},
+		{"500 is not forbidden", &APIError{StatusCode: http.StatusInternalServerError, Body: ""}, false},
+		{"wrapped 403 unwraps via errors.As", fmt.Errorf("read failed: %w", &APIError{StatusCode: http.StatusForbidden}), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsForbidden(tc.err); got != tc.want {
+				t.Errorf("IsForbidden(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}

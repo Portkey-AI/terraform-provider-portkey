@@ -798,7 +798,7 @@ func testAccCheckWorkspaceDestroy(s *terraform.State) error {
 		if err == nil {
 			return fmt.Errorf("workspace %s still exists", rs.Primary.ID)
 		}
-		if !client.IsNotFound(err) {
+		if !client.IsWorkspaceGone(err) {
 			return fmt.Errorf("unexpected error checking workspace %s: %s", rs.Primary.ID, err)
 		}
 	}

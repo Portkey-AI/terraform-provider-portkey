@@ -328,16 +328,17 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	// Get refreshed workspace value from Portkey.
 	//
-	// If the workspace was deleted out-of-band (e.g. via the Portkey UI),
-	// Portkey's Admin API returns 403 (errorCode AB03) for the workspace
-	// id rather than 404. Both 403 and 404 should be treated as
-	// missing-resource so Terraform can reconcile state. Removing the
-	// resource from state lets the user run `terraform apply` to either
-	// re-create or accept the deletion, instead of erroring on every
-	// subsequent plan.
+	// A workspace deleted out-of-band answers 403, not 404 — see
+	// client.IsWorkspaceGone. Dropping it from state lets apply re-create
+	// or accept the deletion instead of erroring on every plan.
 	workspace, err := r.client.GetWorkspace(ctx, state.ID.ValueString())
 	if err != nil {
-		if client.IsNotFound(err) {
+		if client.IsWorkspaceGone(err) {
+			if client.IsForbidden(err) {
+				tflog.Warn(ctx, "Workspace read returned 403; treating it as deleted. If it still exists, check that the Admin API key holds both workspaces.read and workspace_users.read", map[string]interface{}{
+					"workspace_id": state.ID.ValueString(),
+				})
+			}
 			resp.State.RemoveResource(ctx)
 			return
 		}

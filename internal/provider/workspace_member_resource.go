@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
 
@@ -156,10 +157,17 @@ func (r *workspaceMemberResource) Read(ctx context.Context, req resource.ReadReq
 	// Get refreshed member value from Portkey using user_id
 	member, err := r.client.GetWorkspaceMember(ctx, state.WorkspaceID.ValueString(), state.UserID.ValueString())
 	if err != nil {
-		// Portkey returns 404 (AB08) for memberships removed out-of-band and
-		// 403 (AB03) when the user has been removed from the organisation.
-		// Both mean the membership no longer exists.
-		if client.IsNotFound(err) {
+		// A membership removed out-of-band, or whose user left the
+		// organisation, answers 404 AB08. A deleted parent workspace
+		// answers 403 — see client.IsWorkspaceGone. Either way the
+		// membership is gone.
+		if client.IsWorkspaceGone(err) {
+			if client.IsForbidden(err) {
+				tflog.Warn(ctx, "Workspace member read returned 403; treating the membership as removed because its workspace is unreachable. If the workspace still exists, check that the Admin API key holds both workspaces.read and workspace_users.read", map[string]interface{}{
+					"workspace_id": state.WorkspaceID.ValueString(),
+					"user_id":      state.UserID.ValueString(),
+				})
+			}
 			resp.State.RemoveResource(ctx)
 			return
 		}

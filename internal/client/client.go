@@ -120,7 +120,7 @@ func NewClientWithConfig(cfg ClientConfig) (*Client, error) {
 
 // APIError represents a non-2xx response from the Portkey Admin API. Callers
 // can use errors.As to inspect the StatusCode and apply per-status handling
-// (e.g. treating 403/404 on a Read as missing-resource for state
+// (e.g. treating 404 on a Read as missing-resource for state
 // reconciliation).
 //
 // Body is the raw response body so callers can extract Portkey's structured
@@ -136,17 +136,73 @@ func (e *APIError) Error() string {
 }
 
 // IsNotFound reports whether the error indicates a missing resource as
-// signalled by the Portkey API. Portkey returns 404 for some endpoints and
-// 403 (errorCode AB03) for others when a referenced resource has been
-// deleted out-of-band — both should be treated as missing-resource by
-// resource Read implementations so Terraform can reconcile state.
+// signalled by the Portkey API. The Admin API returns 404 (errorCode AB08)
+// when a resource does not exist or was deleted out-of-band, so resource
+// Read implementations can reconcile state against it.
+//
+// A 403 (errorCode AB03) is deliberately NOT treated as missing: it means
+// the calling Admin API key lacks the required scope, or access to the
+// workspace is denied. Swallowing it would silently drop a live resource
+// from state and plan a recreate, so it must surface as a diagnostic.
+//
+// Endpoints whose 404 is produced upstream of the controller — e.g.
+// GET /api-keys/{id}, where the request hydrator answers NOT_FOUND for an
+// unknown id before authorisation runs — can use this for the missing-id
+// case. Note that this is not sufficient on its own for a workspace-scoped
+// key: the hydrator resolves such a key even after its parent workspace is
+// archived, so authorize() then answers 403. Any call site addressing a
+// workspace-scoped resource must also consider IsWorkspaceGone.
 func IsNotFound(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusNotFound
+}
+
+// IsWorkspaceGone reports whether the error means the addressed workspace
+// no longer exists, accepting either 404 or 403.
+//
+// Deleting a workspace archives it (status 'archived') rather than removing
+// the row. On workspace-scoped admin routes the authorize() middleware runs
+// before the controller and, with allowArchivedWorkspaces defaulting to
+// false, builds the caller's permitted workspace set from active workspaces
+// only. An archived workspace is absent from that set, so the middleware
+// answers 403 AB03 and the controller — which would have answered 404 — is
+// never reached. This is independent of the controller-level 404 work in
+// Portkey-AI/albus#2660 and applies to the hosted control plane too.
+//
+// The cost of accepting 403 here is that a genuine permission failure on
+// these reads is still indistinguishable from a deletion: these routes
+// require several scopes (e.g. GET /admin/workspaces/{id} needs both
+// workspaces.read and workspace_users.read), so a partial-scope Admin key
+// looks the same as an archived workspace. That is the lesser evil —
+// treating a deleted workspace as a hard error wedges plan/apply with no
+// recovery short of `terraform state rm`, whereas the permission case
+// removes the resource from state and re-plans it — but callers should pair
+// this with IsForbidden to log the ambiguous case rather than swallowing it
+// silently. Narrowing it to IsNotFound needs a server change: setting
+// allowArchivedWorkspaces: true on the workspace and workspace-member GET
+// routes would let the controller's 404 surface.
+func IsWorkspaceGone(err error) bool {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		return false
 	}
 	return apiErr.StatusCode == http.StatusNotFound ||
 		apiErr.StatusCode == http.StatusForbidden
+}
+
+// IsForbidden reports whether the error is a 403. Use it to distinguish the
+// ambiguous branch of IsWorkspaceGone — where a missing scope cannot be told
+// apart from an archived workspace — so it can be logged before a resource is
+// dropped from state.
+func IsForbidden(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusForbidden
 }
 
 // doRequest performs an HTTP request

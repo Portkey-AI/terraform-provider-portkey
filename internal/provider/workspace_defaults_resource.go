@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
 
@@ -191,10 +192,17 @@ func (r *workspaceDefaultsResource) Read(ctx context.Context, req resource.ReadR
 
 	workspace, err := r.client.GetWorkspace(ctx, state.ID.ValueString())
 	if err != nil {
-		if client.IsNotFound(err) {
-			// Parent workspace is gone. Removing this resource from state
-			// lets terraform apply reconcile (either re-plan or accept the
-			// deletion), mirroring workspace_resource.go Read.
+		if client.IsWorkspaceGone(err) {
+			// Parent workspace is gone (404, or 403 for an archived
+			// workspace — see client.IsWorkspaceGone). Removing this
+			// resource from state lets terraform apply reconcile (either
+			// re-plan or accept the deletion), mirroring
+			// workspace_resource.go Read.
+			if client.IsForbidden(err) {
+				tflog.Warn(ctx, "Workspace defaults read returned 403; treating the workspace as deleted. If it still exists, check that the Admin API key holds both workspaces.read and workspace_users.read", map[string]interface{}{
+					"workspace_id": state.ID.ValueString(),
+				})
+			}
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -308,7 +316,26 @@ func (r *workspaceDefaultsResource) Delete(ctx context.Context, req resource.Del
 		},
 	}
 	if _, err := r.client.UpdateWorkspace(ctx, state.ID.ValueString(), updateReq); err != nil {
+		// A 404 means the parent workspace is already gone, so there is
+		// nothing to clear and the destroy succeeds silently.
 		if client.IsNotFound(err) {
+			return
+		}
+		// A 403 is ambiguous on this route: it is what an archived
+		// workspace returns, but also what a live one returns when the
+		// Admin key holds workspaces.update without workspace_users.create
+		// (PUT /admin/workspaces/{id} requires both). Letting the destroy
+		// succeed keeps an already-deleted workspace from wedging it, but
+		// report it rather than claiming success outright — if the
+		// workspace is live, its guardrails are still attached.
+		if client.IsForbidden(err) {
+			resp.Diagnostics.AddWarning(
+				"Could not confirm workspace defaults were cleared",
+				"Clearing defaults on workspace "+state.ID.ValueString()+" returned 403, which is expected if the "+
+					"workspace was already deleted. The resource has been removed from state. If the workspace still "+
+					"exists, its default guardrails are unchanged — grant the Admin API key both workspaces.update and "+
+					"workspace_users.create and clear them manually. Original error: "+err.Error(),
+			)
 			return
 		}
 		resp.Diagnostics.AddError(

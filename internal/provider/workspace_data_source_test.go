@@ -31,6 +31,10 @@ func TestAccWorkspaceDataSource_basic(t *testing.T) {
 						"data.portkey_workspace.test", "id",
 						"portkey_workspace.test", "id",
 					),
+					resource.TestCheckResourceAttrPair(
+						"data.portkey_workspace.test", "slug",
+						"portkey_workspace.test", "slug",
+					),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "created_at"),
 					resource.TestCheckResourceAttrSet("data.portkey_workspace.test", "updated_at"),
 				),

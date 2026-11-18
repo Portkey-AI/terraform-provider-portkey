@@ -33,6 +33,19 @@ resource "portkey_mcp_integration_workspace_access" "github_dev" {
 }
 ```
 
+### Referencing the Workspace by Slug
+
+`workspace_id` accepts either the workspace UUID (`portkey_workspace.<name>.id`) or its slug (`portkey_workspace.<name>.slug`). The MCP integration API identifies workspaces by slug, so the provider resolves a UUID to its slug before each API call. Whichever form you configure is kept in state unchanged.
+
+```terraform
+resource "portkey_mcp_integration_workspace_access" "github_dev" {
+  mcp_integration_id = portkey_mcp_integration.github.id
+  workspace_id       = portkey_workspace.dev.slug
+}
+```
+
+~> **Note:** The UUID and the slug of the same workspace are different values, and `workspace_id` forces replacement when it changes. Switching an existing resource from one form to the other plans a destroy and re-create, which briefly disables access. To switch without that, remove the resource from state and import it again using the new form.
+
 ### Disable Access
 
 ```terraform
@@ -49,7 +62,7 @@ resource "portkey_mcp_integration_workspace_access" "github_dev" {
 ### Required
 
 - `mcp_integration_id` (String) The MCP integration ID or slug to grant workspace access to.
-- `workspace_id` (String) The workspace ID to grant access to.
+- `workspace_id` (String) The workspace to grant access to, as its UUID (e.g. `portkey_workspace.example.id`) or its slug (e.g. `portkey_workspace.example.slug`). The MCP integration API identifies workspaces by slug, so a UUID is resolved to the slug before each API call; the configured value is kept in state unchanged. Switching between the UUID and slug of the same workspace forces replacement.
 
 ### Optional
 
@@ -57,13 +70,16 @@ resource "portkey_mcp_integration_workspace_access" "github_dev" {
 
 ### Read-Only
 
-- `id` (String) Resource identifier in format mcp_integration_id/workspace_id.
+- `id` (String) Resource identifier in format mcp_integration_id/workspace_id, using workspace_id exactly as configured.
 
 ## Import
 
 Import is supported using the following syntax:
 
 ```shell
-# Import using mcp_integration_id/workspace_id format
-terraform import portkey_mcp_integration_workspace_access.example mcp-integration-id/workspace-id
+# Import using mcp_integration_id/workspace_id format.
+# workspace_id may be the workspace UUID or its slug. Use the same form your
+# configuration uses, or the next plan will propose replacing the resource.
+terraform import portkey_mcp_integration_workspace_access.example mcp-integration-id/workspace-uuid
+terraform import portkey_mcp_integration_workspace_access.example mcp-integration-id/ws-exampl-abc123
 ```

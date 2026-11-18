@@ -30,6 +30,7 @@ type workspaceDataSource struct {
 // workspaceDataSourceModel maps the data source schema data.
 type workspaceDataSourceModel struct {
 	ID          types.String `tfsdk:"id"`
+	Slug        types.String `tfsdk:"slug"`
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
 	UsageLimits types.List   `tfsdk:"usage_limits"`
@@ -52,6 +53,10 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 			"id": schema.StringAttribute{
 				Description: "Workspace identifier. Accepts either the workspace UUID or its slug; whichever form is configured is returned unchanged.",
 				Required:    true,
+			},
+			"slug": schema.StringAttribute{
+				Description: "Workspace slug (e.g. `ws-exampl-abc123`). Some Portkey APIs, such as the MCP integration workspace-access endpoints, identify workspaces by slug rather than UUID.",
+				Computed:    true,
 			},
 			"name": schema.StringAttribute{
 				Description: "Name of the workspace.",
@@ -169,6 +174,7 @@ func (d *workspaceDataSource) Read(ctx context.Context, req datasource.ReadReque
 	// rewrote a caller-supplied slug. When the read is deferred to apply, that changes
 	// the attribute between plan and apply and invalidates the plan of every resource
 	// interpolating it ("Provider produced inconsistent final plan").
+	state.Slug = workspaceSlugValue(workspace.Slug)
 	state.Name = types.StringValue(workspace.Name)
 	state.Description = types.StringValue(workspace.Description)
 

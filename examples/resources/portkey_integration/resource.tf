@@ -88,3 +88,73 @@ variable "aws_secret_access_key" {
   type      = string
   sensitive = true
 }
+
+# ----------------------------------------------------------------------------
+# Google Vertex AI — Service Account JSON key
+# ----------------------------------------------------------------------------
+resource "portkey_integration" "vertex_service_account" {
+  name           = "vertex-production-sa"
+  ai_provider_id = "vertex-ai"
+
+  configurations = jsonencode({
+    vertex_auth_type             = "serviceAccount"
+    vertex_region                = "us-central1"
+    vertex_service_account_json  = jsondecode(var.vertex_service_account_json)
+  })
+}
+
+# ----------------------------------------------------------------------------
+# Google Vertex AI — Workload Identity Federation / Ambient GCP credentials
+#
+# Use this when the gateway pod already has a GCP identity attached (e.g. GKE
+# Workload Identity, Cloud Run service account). No key is stored; the gateway
+# fetches a token from the GCP metadata server at request time.
+# vertex_auth_type = "workload" is the correct value — not "basic".
+# ----------------------------------------------------------------------------
+resource "portkey_integration" "vertex_workload_identity" {
+  name           = "vertex-production-wif"
+  ai_provider_id = "vertex-ai"
+  # No `key` needed — authentication comes from the ambient GCP identity.
+
+  configurations = jsonencode({
+    vertex_auth_type = "workload"
+    vertex_project_id = var.vertex_project_id
+    vertex_region     = "us-central1"
+  })
+}
+
+# ----------------------------------------------------------------------------
+# Google Vertex AI — Basic (short-lived OAuth access token passed as api_key)
+#
+# Use this when you generate a GCP access token externally (e.g. via
+# `gcloud auth print-access-token`) and pass it as the integration key.
+# This is NOT Workload Identity Federation.
+# ----------------------------------------------------------------------------
+resource "portkey_integration" "vertex_basic" {
+  name           = "vertex-production-basic"
+  ai_provider_id = "vertex-ai"
+  key            = var.vertex_access_token   # short-lived GCP OAuth2 access token
+
+  configurations = jsonencode({
+    vertex_auth_type  = "basic"
+    vertex_project_id = var.vertex_project_id
+    vertex_region     = "us-central1"
+  })
+}
+
+variable "vertex_service_account_json" {
+  description = "GCP service account key JSON (full file contents as a string)"
+  type        = string
+  sensitive   = true
+}
+
+variable "vertex_project_id" {
+  description = "GCP project ID for Vertex AI"
+  type        = string
+}
+
+variable "vertex_access_token" {
+  description = "Short-lived GCP OAuth2 access token (for basic auth only)"
+  type        = string
+  sensitive   = true
+}

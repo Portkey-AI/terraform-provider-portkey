@@ -285,7 +285,7 @@ func (r *mcpIntegrationWorkspaceAccessResource) Delete(ctx context.Context, req 
 			resp.Diagnostics.AddError(
 				"Error deleting MCP integration workspace access",
 				fmt.Sprintf("Workspace %s (slug %s) is not listed for MCP integration %s, so its access was not disabled. "+
-					"The integration lists every workspace in the organisation, so this usually means the workspace identifier is wrong. "+
+					"Either the workspace identifier is wrong, or the workspace has no access mapping for this integration. "+
 					"If you have confirmed access is already disabled, remove the resource with `terraform state rm`.",
 					workspaceID, slug, mcpIntegrationID),
 			)
@@ -312,6 +312,15 @@ func (r *mcpIntegrationWorkspaceAccessResource) Delete(ctx context.Context, req 
 
 	err = r.client.UpdateMcpIntegrationWorkspace(ctx, mcpIntegrationID, update)
 	if err != nil {
+		if client.IsNotFound(err) {
+			// The MCP integration was removed or archived between the lookup and
+			// the PUT, so there is no access left to disable.
+			tflog.Info(ctx, "MCP integration no longer exists; treating workspace access as deleted", map[string]interface{}{
+				"mcp_integration_id": mcpIntegrationID,
+				"workspace_id":       workspaceID,
+			})
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Error deleting MCP integration workspace access",
 			"Could not disable MCP integration workspace access: "+err.Error(),

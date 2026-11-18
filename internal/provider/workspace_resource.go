@@ -76,6 +76,18 @@ func workspaceSlugValue(slug string) types.String {
 	return types.StringValue(slug)
 }
 
+// workspaceSlugAfterUpdate returns the slug to write to state after Update.
+// slug is Computed with UseStateForUnknown, so the planned value is the prior
+// state value, and a known planned value (including null) must be kept or
+// Terraform rejects the apply as an inconsistent result. Only an unknown plan
+// value is filled in from the API; Read picks up any server-side change.
+func workspaceSlugAfterUpdate(planned types.String, apiSlug string) types.String {
+	if planned.IsUnknown() {
+		return workspaceSlugValue(apiSlug)
+	}
+	return planned
+}
+
 // Metadata returns the resource type name.
 func (r *workspaceResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_workspace"
@@ -533,11 +545,7 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 
 	// Map response body to schema and populate Computed attribute values.
-	// slug keeps its planned (prior-state) value when known, so an update can
-	// never contradict the plan; Read picks up any server-side change.
-	if plan.Slug.IsNull() || plan.Slug.IsUnknown() {
-		plan.Slug = workspaceSlugValue(workspace.Slug)
-	}
+	plan.Slug = workspaceSlugAfterUpdate(plan.Slug, workspace.Slug)
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 

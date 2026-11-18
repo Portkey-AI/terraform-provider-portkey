@@ -34,11 +34,13 @@ type mcpWorkspaceAccessMock struct {
 	listed map[string]bool
 	// puts records the workspace ids sent in each PUT body.
 	puts []client.McpIntegrationWorkspaceUpdate
+	// putStatus, when non-zero, is returned for every PUT instead of applying it.
+	putStatus int
 }
 
-func newMcpWorkspaceAccessMock(t *testing.T, listed map[string]bool) (*mcpWorkspaceAccessMock, *client.Client) {
+func newMcpWorkspaceAccessMock(t *testing.T, listed map[string]bool, putStatus int) (*mcpWorkspaceAccessMock, *client.Client) {
 	t.Helper()
-	m := &mcpWorkspaceAccessMock{listed: listed}
+	m := &mcpWorkspaceAccessMock{listed: listed, putStatus: putStatus}
 	listPath := "/mcp-integrations/" + unitMcpIntegrationID + "/workspaces"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
@@ -57,6 +59,12 @@ func newMcpWorkspaceAccessMock(t *testing.T, listed map[string]bool) (*mcpWorksp
 			var req client.McpIntegrationWorkspacesUpdateRequest
 			if err := json.Unmarshal(body, &req); err != nil {
 				t.Errorf("bad PUT body %s: %v", body, err)
+			}
+			if m.putStatus != 0 {
+				m.puts = append(m.puts, req.Workspaces...)
+				w.WriteHeader(m.putStatus)
+				_, _ = w.Write([]byte(`{"success":false}`))
+				return
 			}
 			for _, u := range req.Workspaces {
 				m.puts = append(m.puts, u)
@@ -93,7 +101,7 @@ func mcpWorkspaceAccessSchema(t *testing.T, r resource.Resource) resource.Schema
 
 func TestMcpIntegrationWorkspaceAccess_CreateWithUUIDWritesSlugAndKeepsUUID(t *testing.T) {
 	ctx := context.Background()
-	mock, c := newMcpWorkspaceAccessMock(t, map[string]bool{unitWorkspaceSlug: false})
+	mock, c := newMcpWorkspaceAccessMock(t, map[string]bool{unitWorkspaceSlug: false}, 0)
 	r := &mcpIntegrationWorkspaceAccessResource{client: c}
 	s := mcpWorkspaceAccessSchema(t, r).Schema
 
@@ -135,8 +143,11 @@ func TestMcpIntegrationWorkspaceAccess_Delete(t *testing.T) {
 		name        string
 		workspaceID string
 		listed      map[string]bool
+		putStatus   int
 		wantErr     string
 		wantPutSlug string
+		// wantUnapplied means the PUT was sent but the mock rejected it.
+		wantUnapplied bool
 	}{
 		{
 			name:        "UUID disables access by slug",
@@ -157,11 +168,27 @@ func TestMcpIntegrationWorkspaceAccess_Delete(t *testing.T) {
 			listed:      map[string]bool{unitWorkspaceSlug: true},
 			wantErr:     "is not listed for MCP integration",
 		},
+		{
+			// An integration archived between the lookup and the PUT returns 403.
+			name:          "integration gone before PUT succeeds",
+			workspaceID:   unitWorkspaceUUID,
+			listed:        map[string]bool{unitWorkspaceSlug: true},
+			putStatus:     http.StatusForbidden,
+			wantPutSlug:   unitWorkspaceSlug,
+			wantUnapplied: true,
+		},
+		{
+			name:        "PUT server error fails",
+			workspaceID: unitWorkspaceUUID,
+			listed:      map[string]bool{unitWorkspaceSlug: true},
+			putStatus:   http.StatusInternalServerError,
+			wantErr:     "Could not disable MCP integration workspace access",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			mock, c := newMcpWorkspaceAccessMock(t, tc.listed)
+			mock, c := newMcpWorkspaceAccessMock(t, tc.listed, tc.putStatus)
 			r := &mcpIntegrationWorkspaceAccessResource{client: c}
 			s := mcpWorkspaceAccessSchema(t, r).Schema
 
@@ -189,7 +216,7 @@ func TestMcpIntegrationWorkspaceAccess_Delete(t *testing.T) {
 				if joined := strings.Join(details, "\n"); !strings.Contains(joined, tc.wantErr) {
 					t.Fatalf("error %q does not contain %q", joined, tc.wantErr)
 				}
-				if len(mock.puts) != 0 {
+				if tc.putStatus == 0 && len(mock.puts) != 0 {
 					t.Fatalf("expected no PUT, got %+v", mock.puts)
 				}
 				return
@@ -201,7 +228,7 @@ func TestMcpIntegrationWorkspaceAccess_Delete(t *testing.T) {
 			if len(mock.puts) != 1 || mock.puts[0].WorkspaceID != tc.wantPutSlug || mock.puts[0].Enabled {
 				t.Fatalf("expected one PUT disabling slug %q, got %+v", tc.wantPutSlug, mock.puts)
 			}
-			if mock.listed[tc.wantPutSlug] {
+			if !tc.wantUnapplied && mock.listed[tc.wantPutSlug] {
 				t.Fatal("access is still enabled after Delete")
 			}
 		})

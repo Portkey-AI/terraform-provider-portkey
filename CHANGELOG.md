@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`portkey_mcp_integration_workspace_access` now accepts the workspace UUID** (#87). `GET /mcp-integrations/{id}/workspaces` identifies every workspace by its slug, never its UUID, and `GetMcpIntegrationWorkspace()` matched `workspace_id` against that list with an exact string comparison. The documented usage, `workspace_id = portkey_workspace.<name>.id`, passes a UUID, so it never matched: Create and Update failed at the read-after-write, Import failed with `Cannot import non-existent remote object`, and a refresh silently dropped the resource from state. The provider now resolves a UUID to its slug (via `GET /admin/workspaces/{id}`) before every MCP workspace-access API call, the same fallback `portkey_integration_workspace_access` received in 0.2.16. The configured value is kept in state unchanged, so neither form produces a plan diff. A failed workspace lookup is no longer reported as "not found", so a transient API error cannot silently remove the resource from state.
+- **Destroying `portkey_mcp_integration_workspace_access` no longer silently leaves access enabled.** Delete treated a failed lookup as "already deleted" and returned success without disabling anything, which is what a UUID `workspace_id` hit on every destroy. Delete now disables access using the resolved slug. It still succeeds without a call when the MCP integration or the workspace itself no longer exists, but if both exist and the workspace is not listed, it fails with an error instead of reporting success. **Behaviour change:** a destroy that used to "succeed" in that last case now errors; if you have confirmed access is already disabled, remove the resource with `terraform state rm`.
+
+### Added
+- **`slug` attribute on `portkey_workspace` and the `portkey_workspace` / `portkey_workspaces` data sources.** The client already parsed the slug from the API, but no schema exposed it, so there was no way to reference it from configuration. It is read-only, and on the resource it keeps its prior value across updates, so referencing `portkey_workspace.<name>.slug` from a resource with a `RequiresReplace` attribute does not force a replacement on every workspace update. Existing state picks the slug up on the next refresh.
+
+### Upgrade notes
+- If you worked around #87 by hardcoding a workspace slug in `portkey_mcp_integration_workspace_access.workspace_id`, it keeps working; no change is needed. You can replace the literal with `portkey_workspace.<name>.slug` with no plan diff. Switching it to `portkey_workspace.<name>.id` instead changes the value, which forces a replacement that briefly disables access. To switch without that, `terraform state rm` the resource and import it again as `mcp_integration_id/<workspace UUID>`.
+
 ## [0.4.0] - 2026-09-28
 
 ### Fixed

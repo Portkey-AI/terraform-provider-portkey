@@ -40,6 +40,7 @@ type workspaceResource struct {
 // workspaceResourceModel maps the resource schema data.
 type workspaceResourceModel struct {
 	ID          types.String `tfsdk:"id"`
+	Slug        types.String `tfsdk:"slug"`
 	Name        types.String `tfsdk:"name"`
 	Icon        types.String `tfsdk:"icon"`
 	Description types.String `tfsdk:"description"`
@@ -66,6 +67,15 @@ func stripIconPrefix(name, icon string) string {
 	return name
 }
 
+// workspaceSlugValue maps an API slug to state, using null when the API
+// returned none.
+func workspaceSlugValue(slug string) types.String {
+	if slug == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(slug)
+}
+
 // Metadata returns the resource type name.
 func (r *workspaceResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_workspace"
@@ -78,6 +88,13 @@ func (r *workspaceResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Workspace identifier.",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"slug": schema.StringAttribute{
+				Description: "Workspace slug (e.g. `ws-exampl-abc123`). Some Portkey APIs, such as the MCP integration workspace-access endpoints, identify workspaces by slug rather than UUID. Assigned by Portkey when the workspace is created.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -253,6 +270,20 @@ func (r *workspaceResource) Create(ctx context.Context, req resource.CreateReque
 
 	// Map response body to schema and populate Computed attribute values
 	plan.ID = types.StringValue(workspace.ID)
+	plan.Slug = workspaceSlugValue(workspace.Slug)
+	if plan.Slug.IsNull() {
+		// Fall back to a GET if the create response omitted the slug. Failing
+		// here would orphan the workspace we just created, so warn instead;
+		// the next refresh fills the slug in.
+		if fetched, err := r.client.GetWorkspace(ctx, workspace.ID); err == nil {
+			plan.Slug = workspaceSlugValue(fetched.Slug)
+		} else {
+			resp.Diagnostics.AddWarning(
+				"Could not read workspace slug after creation",
+				"The workspace was created, but its slug could not be read: "+err.Error()+". It will be populated on the next refresh.",
+			)
+		}
+	}
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
@@ -418,6 +449,7 @@ func (r *workspaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 		state.Metadata = types.MapNull(types.StringType)
 	}
 
+	state.Slug = workspaceSlugValue(workspace.Slug)
 	state.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	state.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 
@@ -500,7 +532,12 @@ func (r *workspaceResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
-	// Map response body to schema and populate Computed attribute values
+	// Map response body to schema and populate Computed attribute values.
+	// slug keeps its planned (prior-state) value when known, so an update can
+	// never contradict the plan; Read picks up any server-side change.
+	if plan.Slug.IsNull() || plan.Slug.IsUnknown() {
+		plan.Slug = workspaceSlugValue(workspace.Slug)
+	}
 	plan.CreatedAt = types.StringValue(workspace.CreatedAt.Format("2006-01-02T15:04:05Z07:00"))
 	plan.UpdatedAt = types.StringValue(workspace.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"))
 

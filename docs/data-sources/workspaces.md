@@ -30,6 +30,7 @@ Read-Only:
 - `metadata` (Map of String) Custom metadata attached to the workspace.
 - `name` (String) Name of the workspace.
 - `rate_limits` (Attributes List) Rate limits for this workspace. (see [below for nested schema](#nestedatt--workspaces--rate_limits))
+- `slug` (String) Workspace slug (e.g. `ws-exampl-abc123`). Some Portkey APIs, such as the MCP integration workspace-access endpoints, identify workspaces by slug rather than UUID.
 - `updated_at` (String) Timestamp when the workspace was last updated.
 - `usage_limits` (Attributes List) Usage limits for this workspace. (see [below for nested schema](#nestedatt--workspaces--usage_limits))
 

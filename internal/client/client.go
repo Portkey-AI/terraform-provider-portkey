@@ -2381,8 +2381,7 @@ func (c *Client) GetIntegrationWorkspace(ctx context.Context, integrationSlug, w
 	}
 
 	// If no direct match and workspaceID looks like a UUID, try to get workspace slug
-	// UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with dashes)
-	if len(workspaceID) == 36 && strings.Count(workspaceID, "-") == 4 {
+	if looksLikeUUID(workspaceID) {
 		workspace, err := c.GetWorkspace(ctx, workspaceID)
 		if err != nil {
 			// If we can't get workspace details, fall back to original error
@@ -2880,20 +2879,79 @@ func (c *Client) GetMcpIntegrationWorkspaces(ctx context.Context, id string) ([]
 	return response.Workspaces, nil
 }
 
-// GetMcpIntegrationWorkspace retrieves a specific workspace's access for an MCP integration
+// ErrWorkspaceAccessNotFound is returned (wrapped) when an integration's
+// workspace list succeeds but does not contain the requested workspace.
+// Callers distinguish it from API errors with errors.Is.
+var ErrWorkspaceAccessNotFound = errors.New("workspace not found in integration workspace list")
+
+// looksLikeUUID reports whether s has the shape of a UUID
+// (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Workspace slugs never do.
+func looksLikeUUID(s string) bool {
+	return len(s) == 36 && strings.Count(s, "-") == 4
+}
+
+// ResolveWorkspaceSlug returns the slug for a workspace identifier.
+//
+// The integration and MCP integration workspace-access endpoints identify
+// workspaces by slug only, while portkey_workspace.id is the UUID. A value
+// that is not UUID-shaped is assumed to already be a slug and is returned
+// unchanged without an API call. A UUID is looked up with GetWorkspace; the
+// lookup error is returned as-is so callers can test it with IsNotFound.
+func (c *Client) ResolveWorkspaceSlug(ctx context.Context, workspaceID string) (string, error) {
+	if !looksLikeUUID(workspaceID) {
+		return workspaceID, nil
+	}
+
+	workspace, err := c.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if workspace.Slug == "" {
+		return "", fmt.Errorf("workspace %s has no slug in the API response", workspaceID)
+	}
+
+	return workspace.Slug, nil
+}
+
+// GetMcpIntegrationWorkspace retrieves a specific workspace's access for an MCP integration.
+//
+// GET /mcp-integrations/{id}/workspaces lists every workspace in the
+// organisation and identifies each one by slug, so workspaceID may be a slug
+// or a UUID: a UUID that does not match directly is resolved to its slug and
+// the list is searched again. If the workspace is not listed, the returned
+// error wraps ErrWorkspaceAccessNotFound. A failed UUID lookup is returned
+// wrapped, so IsNotFound still reports a workspace that no longer exists.
 func (c *Client) GetMcpIntegrationWorkspace(ctx context.Context, id, workspaceID string) (*McpIntegrationWorkspace, error) {
 	workspaces, err := c.GetMcpIntegrationWorkspaces(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, ws := range workspaces {
-		if ws.WorkspaceID == workspaceID {
-			return &ws, nil
+	find := func(key string) *McpIntegrationWorkspace {
+		for i := range workspaces {
+			if workspaces[i].WorkspaceID == key {
+				return &workspaces[i]
+			}
 		}
+		return nil
 	}
 
-	return nil, fmt.Errorf("workspace %s not found for MCP integration %s", workspaceID, id)
+	if ws := find(workspaceID); ws != nil {
+		return ws, nil
+	}
+
+	if looksLikeUUID(workspaceID) {
+		slug, err := c.ResolveWorkspaceSlug(ctx, workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("could not resolve workspace %s to its slug: %w", workspaceID, err)
+		}
+		if ws := find(slug); ws != nil {
+			return ws, nil
+		}
+		return nil, fmt.Errorf("%w: workspace %s (slug %s) not found for MCP integration %s", ErrWorkspaceAccessNotFound, workspaceID, slug, id)
+	}
+
+	return nil, fmt.Errorf("%w: workspace %s not found for MCP integration %s", ErrWorkspaceAccessNotFound, workspaceID, id)
 }
 
 // UpdateMcpIntegrationWorkspace updates a single workspace's access for an MCP integration

@@ -2,9 +2,11 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -12,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/portkey-ai/terraform-provider-portkey/internal/client"
 )
 
@@ -51,7 +54,7 @@ func (r *mcpIntegrationWorkspaceAccessResource) Schema(_ context.Context, _ reso
 		Description: "Manages workspace access for a Portkey MCP integration. Controls which workspaces can use a specific MCP integration.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Resource identifier in format mcp_integration_id/workspace_id.",
+				Description: "Resource identifier in format mcp_integration_id/workspace_id, using workspace_id exactly as configured.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -65,7 +68,7 @@ func (r *mcpIntegrationWorkspaceAccessResource) Schema(_ context.Context, _ reso
 				},
 			},
 			"workspace_id": schema.StringAttribute{
-				Description: "The workspace ID to grant access to.",
+				Description: "The workspace to grant access to, as its UUID (e.g. `portkey_workspace.example.id`) or its slug (e.g. `portkey_workspace.example.slug`). The MCP integration API identifies workspaces by slug, so a UUID is resolved to the slug before each API call; the configured value is kept in state unchanged. Switching between the UUID and slug of the same workspace forces replacement.",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -99,6 +102,27 @@ func (r *mcpIntegrationWorkspaceAccessResource) Configure(_ context.Context, req
 	r.client = c
 }
 
+// resolveWorkspaceSlug resolves workspaceID (a UUID or slug) to the slug the
+// MCP integration workspace endpoints use, reporting failures as diagnostics.
+func (r *mcpIntegrationWorkspaceAccessResource) resolveWorkspaceSlug(ctx context.Context, workspaceID, summary string, diags *diag.Diagnostics) (string, bool) {
+	slug, err := r.client.ResolveWorkspaceSlug(ctx, workspaceID)
+	if err != nil {
+		diags.AddError(
+			summary,
+			fmt.Sprintf("Could not resolve workspace %s to its slug: %s", workspaceID, err),
+		)
+		return "", false
+	}
+	return slug, true
+}
+
+// isMcpWorkspaceAccessGone reports whether err means the grant no longer
+// exists: either the MCP integration is gone, or it no longer lists the
+// workspace (or the workspace itself is gone).
+func isMcpWorkspaceAccessGone(err error) bool {
+	return errors.Is(err, client.ErrWorkspaceAccessNotFound) || client.IsNotFound(err)
+}
+
 // Create creates the resource and sets the initial Terraform state.
 func (r *mcpIntegrationWorkspaceAccessResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan mcpIntegrationWorkspaceAccessResourceModel
@@ -108,8 +132,16 @@ func (r *mcpIntegrationWorkspaceAccessResource) Create(ctx context.Context, req 
 		return
 	}
 
+	// The API identifies workspaces by slug, so resolve a UUID before the
+	// write and use the slug for both the write and the read-back. State keeps
+	// the configured value so there is no plan diff.
+	slug, ok := r.resolveWorkspaceSlug(ctx, plan.WorkspaceID.ValueString(), "Error creating MCP integration workspace access", &resp.Diagnostics)
+	if !ok {
+		return
+	}
+
 	update := client.McpIntegrationWorkspaceUpdate{
-		WorkspaceID: plan.WorkspaceID.ValueString(),
+		WorkspaceID: slug,
 		Enabled:     plan.Enabled.ValueBool(),
 	}
 
@@ -125,7 +157,7 @@ func (r *mcpIntegrationWorkspaceAccessResource) Create(ctx context.Context, req 
 	plan.ID = types.StringValue(fmt.Sprintf("%s/%s", plan.McpIntegrationID.ValueString(), plan.WorkspaceID.ValueString()))
 
 	// Fetch actual state from API
-	workspace, err := r.client.GetMcpIntegrationWorkspace(ctx, plan.McpIntegrationID.ValueString(), plan.WorkspaceID.ValueString())
+	workspace, err := r.client.GetMcpIntegrationWorkspace(ctx, plan.McpIntegrationID.ValueString(), slug)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error reading MCP integration workspace access after creation",
@@ -151,16 +183,13 @@ func (r *mcpIntegrationWorkspaceAccessResource) Read(ctx context.Context, req re
 
 	workspace, err := r.client.GetMcpIntegrationWorkspace(ctx, state.McpIntegrationID.ValueString(), state.WorkspaceID.ValueString())
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "not found") ||
-			strings.Contains(msg, "status 404") ||
-			strings.Contains(msg, "404 Not Found") {
+		if isMcpWorkspaceAccessGone(err) {
 			resp.State.RemoveResource(ctx)
 			return
 		}
 		resp.Diagnostics.AddError(
 			"Error reading MCP integration workspace access",
-			"Could not read workspace access for workspace "+state.WorkspaceID.ValueString()+": "+msg,
+			"Could not read workspace access for workspace "+state.WorkspaceID.ValueString()+": "+err.Error(),
 		)
 		return
 	}
@@ -180,8 +209,13 @@ func (r *mcpIntegrationWorkspaceAccessResource) Update(ctx context.Context, req 
 		return
 	}
 
+	slug, ok := r.resolveWorkspaceSlug(ctx, plan.WorkspaceID.ValueString(), "Error updating MCP integration workspace access", &resp.Diagnostics)
+	if !ok {
+		return
+	}
+
 	update := client.McpIntegrationWorkspaceUpdate{
-		WorkspaceID: plan.WorkspaceID.ValueString(),
+		WorkspaceID: slug,
 		Enabled:     plan.Enabled.ValueBool(),
 	}
 
@@ -195,7 +229,7 @@ func (r *mcpIntegrationWorkspaceAccessResource) Update(ctx context.Context, req 
 	}
 
 	// Fetch actual state from API
-	workspace, err := r.client.GetMcpIntegrationWorkspace(ctx, plan.McpIntegrationID.ValueString(), plan.WorkspaceID.ValueString())
+	workspace, err := r.client.GetMcpIntegrationWorkspace(ctx, plan.McpIntegrationID.ValueString(), slug)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error reading MCP integration workspace access after update",
@@ -210,7 +244,12 @@ func (r *mcpIntegrationWorkspaceAccessResource) Update(ctx context.Context, req 
 	resp.Diagnostics.Append(diags...)
 }
 
-// Delete deletes the resource and removes the Terraform state on success.
+// Delete disables the workspace's access and removes the Terraform state on success.
+//
+// It only treats the grant as already gone when the MCP integration or the
+// workspace itself no longer exists. If both exist but the workspace is not
+// listed, Delete fails instead of reporting success, because returning
+// silently there would leave access enabled.
 func (r *mcpIntegrationWorkspaceAccessResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state mcpIntegrationWorkspaceAccessResourceModel
 	diags := req.State.Get(ctx, &state)
@@ -219,39 +258,63 @@ func (r *mcpIntegrationWorkspaceAccessResource) Delete(ctx context.Context, req 
 		return
 	}
 
-	// Check if resource still exists
-	_, err := r.client.GetMcpIntegrationWorkspace(ctx, state.McpIntegrationID.ValueString(), state.WorkspaceID.ValueString())
+	mcpIntegrationID := state.McpIntegrationID.ValueString()
+	workspaceID := state.WorkspaceID.ValueString()
+
+	slug, err := r.client.ResolveWorkspaceSlug(ctx, workspaceID)
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "not found") ||
-			strings.Contains(msg, "status 404") ||
-			strings.Contains(msg, "404 Not Found") {
+		if client.IsNotFound(err) {
+			// The workspace no longer exists, so there is no access left to disable.
+			tflog.Info(ctx, "Workspace no longer exists; treating MCP integration workspace access as deleted", map[string]interface{}{
+				"mcp_integration_id": mcpIntegrationID,
+				"workspace_id":       workspaceID,
+			})
 			return
 		}
 		resp.Diagnostics.AddError(
 			"Error deleting MCP integration workspace access",
-			"Could not verify MCP integration workspace access exists: "+msg,
+			fmt.Sprintf("Could not resolve workspace %s to its slug: %s", workspaceID, err),
 		)
+		return
+	}
+
+	_, err = r.client.GetMcpIntegrationWorkspace(ctx, mcpIntegrationID, slug)
+	if err != nil {
+		switch {
+		case errors.Is(err, client.ErrWorkspaceAccessNotFound):
+			resp.Diagnostics.AddError(
+				"Error deleting MCP integration workspace access",
+				fmt.Sprintf("Workspace %s (slug %s) is not listed for MCP integration %s, so its access was not disabled. "+
+					"The integration lists every workspace in the organisation, so this usually means the workspace identifier is wrong. "+
+					"If you have confirmed access is already disabled, remove the resource with `terraform state rm`.",
+					workspaceID, slug, mcpIntegrationID),
+			)
+		case client.IsNotFound(err):
+			// The MCP integration no longer exists, so there is no access left to disable.
+			tflog.Info(ctx, "MCP integration no longer exists; treating workspace access as deleted", map[string]interface{}{
+				"mcp_integration_id": mcpIntegrationID,
+				"workspace_id":       workspaceID,
+			})
+		default:
+			resp.Diagnostics.AddError(
+				"Error deleting MCP integration workspace access",
+				"Could not verify MCP integration workspace access exists: "+err.Error(),
+			)
+		}
 		return
 	}
 
 	// Disable workspace access
 	update := client.McpIntegrationWorkspaceUpdate{
-		WorkspaceID: state.WorkspaceID.ValueString(),
+		WorkspaceID: slug,
 		Enabled:     false,
 	}
 
-	err = r.client.UpdateMcpIntegrationWorkspace(ctx, state.McpIntegrationID.ValueString(), update)
+	err = r.client.UpdateMcpIntegrationWorkspace(ctx, mcpIntegrationID, update)
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "not found") ||
-			strings.Contains(msg, "status 404") ||
-			strings.Contains(msg, "404 Not Found") {
-			return
-		}
 		resp.Diagnostics.AddError(
 			"Error deleting MCP integration workspace access",
-			"Could not disable MCP integration workspace access: "+msg,
+			"Could not disable MCP integration workspace access: "+err.Error(),
 		)
 		return
 	}

@@ -27,6 +27,7 @@ func TestAccWorkspaceResource_basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("portkey_workspace.test", "id"),
 					resource.TestCheckResourceAttr("portkey_workspace.test", "name", rName),
 					resource.TestCheckResourceAttr("portkey_workspace.test", "description", "Initial description"),
+					resource.TestCheckResourceAttrSet("portkey_workspace.test", "slug"),
 					resource.TestCheckResourceAttrSet("portkey_workspace.test", "created_at"),
 					resource.TestCheckResourceAttrSet("portkey_workspace.test", "updated_at"),
 				),

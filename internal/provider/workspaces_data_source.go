@@ -34,6 +34,7 @@ type workspacesDataSourceModel struct {
 // workspaceModel maps workspace data
 type workspaceModel struct {
 	ID          types.String `tfsdk:"id"`
+	Slug        types.String `tfsdk:"slug"`
 	Name        types.String `tfsdk:"name"`
 	Icon        types.String `tfsdk:"icon"`
 	Description types.String `tfsdk:"description"`
@@ -61,6 +62,10 @@ func (d *workspacesDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
 							Description: "Workspace identifier.",
+							Computed:    true,
+						},
+						"slug": schema.StringAttribute{
+							Description: "Workspace slug (e.g. `ws-exampl-abc123`). Some Portkey APIs, such as the MCP integration workspace-access endpoints, identify workspaces by slug rather than UUID.",
 							Computed:    true,
 						},
 						"name": schema.StringAttribute{
@@ -210,6 +215,7 @@ func (d *workspacesDataSource) Read(ctx context.Context, req datasource.ReadRequ
 
 		workspaceState := workspaceModel{
 			ID:          types.StringValue(workspace.ID),
+			Slug:        workspaceSlugValue(workspace.Slug),
 			Name:        types.StringValue(workspace.Name),
 			Icon:        iconVal,
 			Description: types.StringValue(workspace.Description),

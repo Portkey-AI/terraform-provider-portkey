@@ -549,3 +549,180 @@ func TestUpdateRateLimitsPolicyRequestJSON(t *testing.T) {
 		t.Errorf("unexpected body for empty conditions\n got: %s\nwant: %s", encoded, want)
 	}
 }
+
+// Workspace-access fixtures. The integration and MCP integration
+// workspace-list endpoints identify every workspace by slug, while
+// portkey_workspace.id is the UUID; these tests pin the UUID -> slug fallback.
+const (
+	testWorkspaceUUID  = "11111111-1111-4111-8111-111111111111"
+	testWorkspaceSlug  = "ws-exampl-abc123"
+	testMcpIntegration = "22222222-2222-4222-8222-222222222222"
+	testMcpWorkspaces  = `{"workspaces":[` +
+		`{"id":"ws-exampl-abc123","enabled":true,"status":"active"},` +
+		`{"id":"ws-other-def456","enabled":false,"status":"archived"}],` +
+		`"global_workspace_access":{"enabled":false},"object":"integration"}`
+)
+
+// newWorkspaceAccessServer routes GET requests by path: the MCP and
+// integration workspace lists, and GET /admin/workspaces/{uuid}, which answers
+// with workspaceStatus/workspaceBody. It records every request path.
+func newWorkspaceAccessServer(t *testing.T, workspaceStatus int, workspaceBody string) (*httptest.Server, *[]string) {
+	t.Helper()
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/mcp-integrations/" + testMcpIntegration + "/workspaces",
+			"/integrations/my-integration/workspaces":
+			_, _ = w.Write([]byte(testMcpWorkspaces))
+		case "/admin/workspaces/" + testWorkspaceUUID:
+			w.WriteHeader(workspaceStatus)
+			_, _ = w.Write([]byte(workspaceBody))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &paths
+}
+
+const testWorkspaceBody = `{"id":"` + testWorkspaceUUID + `","slug":"` + testWorkspaceSlug + `","name":"Example"}`
+
+func TestGetMcpIntegrationWorkspace_SlugMatchesDirectly(t *testing.T) {
+	srv, paths := newWorkspaceAccessServer(t, http.StatusOK, testWorkspaceBody)
+	c := newTestClient(t, srv.URL)
+
+	ws, err := c.GetMcpIntegrationWorkspace(context.Background(), testMcpIntegration, testWorkspaceSlug)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ws.WorkspaceID != testWorkspaceSlug || !ws.Enabled {
+		t.Fatalf("unexpected workspace: %+v", ws)
+	}
+	if len(*paths) != 1 {
+		t.Fatalf("a slug should need only the list request, got %v", *paths)
+	}
+}
+
+func TestGetMcpIntegrationWorkspace_UUIDResolvesToSlug(t *testing.T) {
+	srv, paths := newWorkspaceAccessServer(t, http.StatusOK, testWorkspaceBody)
+	c := newTestClient(t, srv.URL)
+
+	ws, err := c.GetMcpIntegrationWorkspace(context.Background(), testMcpIntegration, testWorkspaceUUID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ws.WorkspaceID != testWorkspaceSlug || !ws.Enabled {
+		t.Fatalf("unexpected workspace: %+v", ws)
+	}
+	if len(*paths) != 2 || (*paths)[1] != "/admin/workspaces/"+testWorkspaceUUID {
+		t.Fatalf("expected list then workspace lookup, got %v", *paths)
+	}
+}
+
+func TestGetMcpIntegrationWorkspace_NotListed(t *testing.T) {
+	cases := []struct {
+		name        string
+		workspaceID string
+		body        string
+	}{
+		{"unknown slug", "ws-missing-zzz999", testWorkspaceBody},
+		{"UUID whose slug is not listed", testWorkspaceUUID, `{"id":"` + testWorkspaceUUID + `","slug":"ws-missing-zzz999"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newWorkspaceAccessServer(t, http.StatusOK, tc.body)
+			c := newTestClient(t, srv.URL)
+
+			_, err := c.GetMcpIntegrationWorkspace(context.Background(), testMcpIntegration, tc.workspaceID)
+			if !errors.Is(err, ErrWorkspaceAccessNotFound) {
+				t.Fatalf("expected ErrWorkspaceAccessNotFound, got %v", err)
+			}
+			if IsNotFound(err) {
+				t.Fatalf("a missing list entry must not look like an API 404: %v", err)
+			}
+		})
+	}
+}
+
+func TestGetMcpIntegrationWorkspace_WorkspaceLookupErrors(t *testing.T) {
+	cases := []struct {
+		name         string
+		status       int
+		wantNotFound bool
+	}{
+		// The workspace was deleted: IsNotFound must survive the wrapping so
+		// Read can drop the resource from state.
+		{"workspace gone", http.StatusNotFound, true},
+		// A transient failure must surface as an error, not as "not found",
+		// or Read would silently drop the resource from state.
+		{"server error", http.StatusInternalServerError, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newWorkspaceAccessServer(t, tc.status, `{"error":"boom"}`)
+			c := newTestClient(t, srv.URL)
+
+			_, err := c.GetMcpIntegrationWorkspace(context.Background(), testMcpIntegration, testWorkspaceUUID)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if errors.Is(err, ErrWorkspaceAccessNotFound) {
+				t.Fatalf("a failed workspace lookup must not be reported as a missing list entry: %v", err)
+			}
+			if got := IsNotFound(err); got != tc.wantNotFound {
+				t.Fatalf("IsNotFound = %v, want %v (err: %v)", got, tc.wantNotFound, err)
+			}
+		})
+	}
+}
+
+func TestResolveWorkspaceSlug(t *testing.T) {
+	t.Run("slug is returned without an API call", func(t *testing.T) {
+		srv, paths := newWorkspaceAccessServer(t, http.StatusOK, testWorkspaceBody)
+		c := newTestClient(t, srv.URL)
+
+		slug, err := c.ResolveWorkspaceSlug(context.Background(), testWorkspaceSlug)
+		if err != nil || slug != testWorkspaceSlug {
+			t.Fatalf("got (%q, %v), want (%q, nil)", slug, err, testWorkspaceSlug)
+		}
+		if len(*paths) != 0 {
+			t.Fatalf("expected no requests, got %v", *paths)
+		}
+	})
+
+	t.Run("UUID is looked up", func(t *testing.T) {
+		srv, _ := newWorkspaceAccessServer(t, http.StatusOK, testWorkspaceBody)
+		c := newTestClient(t, srv.URL)
+
+		slug, err := c.ResolveWorkspaceSlug(context.Background(), testWorkspaceUUID)
+		if err != nil || slug != testWorkspaceSlug {
+			t.Fatalf("got (%q, %v), want (%q, nil)", slug, err, testWorkspaceSlug)
+		}
+	})
+
+	t.Run("UUID with no slug in the response is an error", func(t *testing.T) {
+		srv, _ := newWorkspaceAccessServer(t, http.StatusOK, `{"id":"`+testWorkspaceUUID+`"}`)
+		c := newTestClient(t, srv.URL)
+
+		if _, err := c.ResolveWorkspaceSlug(context.Background(), testWorkspaceUUID); err == nil {
+			t.Fatal("expected an error for a missing slug")
+		}
+	})
+}
+
+// TestGetIntegrationWorkspace_UUIDResolvesToSlug covers the v0.2.16 fix for
+// portkey_integration_workspace_access, which had no unit test.
+func TestGetIntegrationWorkspace_UUIDResolvesToSlug(t *testing.T) {
+	srv, _ := newWorkspaceAccessServer(t, http.StatusOK, testWorkspaceBody)
+	c := newTestClient(t, srv.URL)
+
+	ws, err := c.GetIntegrationWorkspace(context.Background(), "my-integration", testWorkspaceUUID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ws.ID != testWorkspaceSlug {
+		t.Fatalf("expected slug %q, got %q", testWorkspaceSlug, ws.ID)
+	}
+}

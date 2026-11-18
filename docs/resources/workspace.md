@@ -97,6 +97,7 @@ Set `force_delete = true` to have the provider delete all dependent resources (p
 
 - `created_at` (String) Timestamp when the workspace was created.
 - `id` (String) Workspace identifier.
+- `slug` (String) Workspace slug (e.g. `ws-exampl-abc123`). Some Portkey APIs, such as the MCP integration workspace-access endpoints, identify workspaces by slug rather than UUID. Assigned by Portkey when the workspace is created.
 - `updated_at` (String) Timestamp when the workspace was last updated.
 
 <a id="nestedatt--rate_limits"></a>
